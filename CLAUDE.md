@@ -60,7 +60,7 @@ signal/
 [Public `/`] → product copy + Log in / Sign up → `/login` → BYOK in `/settings` → `/feed` (onboarding page optional / later)
 [Supabase Auth] → session (cookie) → protected /feed, /settings, /onboarding
        ↓
-[Cron: every 4 hours] (scrape only — filter is on-demand per user with BYOK)
+[Cron: daily on Vercel Hobby] (scrape only — filter is on-demand per user with BYOK; `vercel.json` uses `0 0 * * *` because Hobby allows at most one cron invocation per day)
        ↓
 [Scraper]       → fetches RSS + Reddit + HN → shared raw_stories pool
        ↓
@@ -200,7 +200,7 @@ Key profile attributes:
 - Claude Haiku JSON scoring prompt: ask for a plain JSON array, no markdown fences. Then strip any accidental fences with `.replace(/^```json\s*/i, '')` before `JSON.parse`. Prevents parse failures if the model adds fences anyway.
 - Supabase `upsert` with `{ onConflict: 'url', ignoreDuplicates: true }` is the right call for deduplication in both scrapers and scored stories — don't use `insert` which throws on duplicate key.
 - Per-run filter prefs (topic emphasis + focus calibration) are sent as JSON `POST` to `/api/filter`; `GET` (e.g. Vercel cron) omits a body and uses default prefs in `lib/pipeline-preferences.ts`.
-- Vercel cron: scrape only at `:00` of every 4th hour (BYOK filter is on-demand per user, not cron).
+- Vercel cron (Hobby): scrape once daily at `00:00` UTC (`0 0 * * *` in `vercel.json`). More frequent schedules fail deploy on Hobby; use Pro or an external scheduler if you need `/api/scrape` more often.
 - Verification loop that worked well: run live app -> capture screenshot -> compare expected UI -> inspect API/DB state -> patch -> lint -> screenshot again.
 - Fast diagnosis pattern: compare the same query with anon key vs service-role key; a large count mismatch immediately identifies access-layer issues (not ingestion/filter bugs).
 
