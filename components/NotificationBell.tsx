@@ -38,6 +38,7 @@ export function NotificationBell() {
       // Save subscription to DB via API
       await fetch('/api/push/subscribe', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sub),
       })
@@ -59,6 +60,7 @@ export function NotificationBell() {
         await sub.unsubscribe()
         await fetch('/api/push/unsubscribe', {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ endpoint: sub.endpoint }),
         })

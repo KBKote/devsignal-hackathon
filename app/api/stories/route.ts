@@ -1,9 +1,15 @@
 import { NextResponse } from 'next/server'
+import { getSessionUser } from '@/lib/auth/session'
 import { supabaseAdmin } from '@/lib/supabase-server'
 
 const ARCHIVE_HOURS = 48
 
 export async function GET() {
+  const user = await getSessionUser()
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   const cutoff = new Date(Date.now() - ARCHIVE_HOURS * 3_600_000).toISOString()
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 8_000)
@@ -13,6 +19,7 @@ export async function GET() {
     .select(
       'id,raw_story_id,title,url,source,summary,category,score,why,published_at,scored_at,seen,notified'
     )
+    .eq('user_id', user.id)
     .gte('scored_at', cutoff)
     .gte('score', 5)
     .order('score', { ascending: false })

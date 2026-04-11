@@ -1,12 +1,35 @@
 import Anthropic from '@anthropic-ai/sdk'
+import {
+  buildPreferenceOverlay,
+  DEFAULT_PIPELINE_PREFS,
+  type PipelinePreferences,
+} from './pipeline-preferences'
 import { supabaseAdmin } from './supabase-server'
-import { USER_PROFILE } from './user-profile'
-
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 const MODEL = 'claude-haiku-4-5-20251001'
-const BATCH_SIZE = 15
+/** Fewer stories per run keeps the pipeline responsive (each batch is one Haiku call). */
+const BATCH_SIZE = 18
 const MIN_SCORE_TO_STORE = 5
+const RAW_FETCH_LIMIT = 400
+const MAX_CANDIDATES = 36
+/** Avoid hanging forever if Anthropic is slow or unreachable. */
+const BATCH_TIMEOUT_MS = 120_000
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms)
+    promise.then(
+      (v) => {
+        clearTimeout(t)
+        resolve(v)
+      },
+      (e) => {
+        clearTimeout(t)
+        reject(e)
+      }
+    )
+  })
+}
 
 interface RawStory {
   id: string
@@ -25,10 +48,20 @@ interface ScoredResult {
   summary: string
 }
 
-// ─────────────────────────────────────────────────────────
-// Score a batch of stories with a single Claude Haiku call
-// ─────────────────────────────────────────────────────────
-async function scoreBatch(stories: RawStory[]): Promise<{
+export interface RunFilterContext {
+  userId: string
+  anthropicApiKey: string
+  /** Full profile block (defaults + onboarding) */
+  userPrompt: string
+  prefs?: PipelinePreferences
+}
+
+async function scoreBatch(
+  client: Anthropic,
+  stories: RawStory[],
+  userPrompt: string,
+  prefs: PipelinePreferences
+): Promise<{
   results: ScoredResult[]
   inputTokens: number
   outputTokens: number
@@ -39,7 +72,10 @@ async function scoreBatch(stories: RawStory[]): Promise<{
     text: s.raw_text?.slice(0, 500) ?? '',
   }))
 
-  const prompt = `${USER_PROFILE}
+  const overlay = buildPreferenceOverlay(prefs)
+
+  const prompt = `${userPrompt}
+${overlay}
 
 Score each of the following stories. Return ONLY a valid JSON array — no markdown, no explanation, just the array.
 
@@ -53,7 +89,7 @@ Each object must have:
 Stories to score:
 ${JSON.stringify(storiesPayload, null, 2)}`
 
-  const response = await anthropic.messages.create({
+  const response = await client.messages.create({
     model: MODEL,
     max_tokens: 4096,
     messages: [{ role: 'user', content: prompt }],
@@ -61,7 +97,6 @@ ${JSON.stringify(storiesPayload, null, 2)}`
 
   const rawText = response.content[0].type === 'text' ? response.content[0].text : ''
 
-  // Strip any accidental markdown fences
   const cleaned = rawText
     .replace(/^```json\s*/i, '')
     .replace(/^```\s*/i, '')
@@ -73,7 +108,6 @@ ${JSON.stringify(storiesPayload, null, 2)}`
     results = JSON.parse(cleaned)
   } catch {
     console.error('[Filter] Failed to parse Claude response:', rawText.slice(0, 500))
-    // Return empty rather than crashing — these stories will remain unprocessed
     results = []
   }
 
@@ -84,70 +118,105 @@ ${JSON.stringify(storiesPayload, null, 2)}`
   }
 }
 
-// ─────────────────────────────────────────────────────────
-// Main filter run — called by /api/filter
-// ─────────────────────────────────────────────────────────
-export async function runFilterPipeline(): Promise<{
+/**
+ * Per-user filter: scores raw_stories not yet in user_raw_scored for this user.
+ */
+export async function runFilterPipeline(ctx: RunFilterContext): Promise<{
   processed: number
   stored: number
   totalInputTokens: number
   totalOutputTokens: number
   estimatedCost: number
 }> {
-  // 1. Fetch unprocessed stories
-  const { data: rawStories, error: fetchError } = await supabaseAdmin
+  const prefs = ctx.prefs ?? DEFAULT_PIPELINE_PREFS
+  const client = new Anthropic({ apiKey: ctx.anthropicApiKey })
+
+  const { data: raws, error: fetchError } = await supabaseAdmin
     .from('raw_stories')
     .select('id, title, url, source, raw_text, published_at')
-    .eq('processed', false)
     .order('scraped_at', { ascending: true })
-    .limit(100)
+    .limit(RAW_FETCH_LIMIT)
 
   if (fetchError) throw new Error(`Failed to fetch raw stories: ${fetchError.message}`)
-  if (!rawStories || rawStories.length === 0) {
+  if (!raws?.length) {
     return { processed: 0, stored: 0, totalInputTokens: 0, totalOutputTokens: 0, estimatedCost: 0 }
   }
 
-  console.log(`[Filter] Processing ${rawStories.length} stories in batches of ${BATCH_SIZE}`)
+  const ids = raws.map((r) => r.id)
+  const { data: doneRows } = await supabaseAdmin
+    .from('user_raw_scored')
+    .select('raw_story_id')
+    .eq('user_id', ctx.userId)
+    .in('raw_story_id', ids)
+
+  const done = new Set((doneRows ?? []).map((d) => d.raw_story_id as string))
+  const candidates = raws.filter((r) => !done.has(r.id)).slice(0, MAX_CANDIDATES)
+
+  if (candidates.length === 0) {
+    return { processed: 0, stored: 0, totalInputTokens: 0, totalOutputTokens: 0, estimatedCost: 0 }
+  }
+
+  console.log(
+    `[Filter] User ${ctx.userId.slice(0, 8)}… — ${candidates.length} candidates, batches of ${BATCH_SIZE}`
+  )
 
   let totalInputTokens = 0
   let totalOutputTokens = 0
   let totalStored = 0
-  const processedIds: string[] = []
+  let totalMarked = 0
 
-  // 2. Process in batches
-  for (let i = 0; i < rawStories.length; i += BATCH_SIZE) {
-    const batch = rawStories.slice(i, i + BATCH_SIZE)
+  for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
+    const batch = candidates.slice(i, i + BATCH_SIZE)
 
     try {
-      const { results, inputTokens, outputTokens } = await scoreBatch(batch)
+      const batchLabel = `Haiku batch ${Math.floor(i / BATCH_SIZE) + 1}`
+      const { results, inputTokens, outputTokens } = await withTimeout(
+        scoreBatch(client, batch, ctx.userPrompt, prefs),
+        BATCH_TIMEOUT_MS,
+        batchLabel
+      )
       totalInputTokens += inputTokens
       totalOutputTokens += outputTokens
 
-      // 3. Write high-scoring stories to scored_stories
-      const toInsert = results
-        .filter((r) => r.score >= MIN_SCORE_TO_STORE && r.category !== 'noise')
-        .map((r) => {
-          const original = batch.find((s) => s.id === r.id)
-          return {
-            raw_story_id: r.id,
-            title: original?.title ?? '',
-            url: original?.url ?? '',
-            source: original?.source ?? '',
-            published_at: original?.published_at ?? null,
+      const resultById = new Map(results.map((r) => [r.id, r]))
+      const markRows: { user_id: string; raw_story_id: string }[] = []
+      const toInsert: Record<string, unknown>[] = []
+
+      for (const story of batch) {
+        const r = resultById.get(story.id)
+        if (!r) continue
+
+        markRows.push({ user_id: ctx.userId, raw_story_id: story.id })
+
+        if (r.score >= MIN_SCORE_TO_STORE && r.category !== 'noise') {
+          toInsert.push({
+            user_id: ctx.userId,
+            raw_story_id: story.id,
+            title: story.title,
+            url: story.url,
+            source: story.source,
+            published_at: story.published_at,
             score: r.score,
             category: r.category,
             summary: r.summary,
             why: r.why,
-          }
+          })
+        }
+      }
+
+      if (markRows.length > 0) {
+        const { error: markErr } = await supabaseAdmin.from('user_raw_scored').upsert(markRows, {
+          onConflict: 'user_id,raw_story_id',
         })
+        if (markErr) {
+          console.error('[Filter] user_raw_scored upsert error:', markErr.message)
+        } else {
+          totalMarked += markRows.length
+        }
+      }
 
       if (toInsert.length > 0) {
-        // Use insert (not upsert) — raw_stories deduplicates by URL upstream,
-        // and processed=true prevents the same story from being scored twice.
-        const { error: insertError } = await supabaseAdmin
-          .from('scored_stories')
-          .insert(toInsert)
-
+        const { error: insertError } = await supabaseAdmin.from('scored_stories').insert(toInsert)
         if (insertError) {
           console.error('[Filter] Insert error:', insertError.message)
         } else {
@@ -155,43 +224,31 @@ export async function runFilterPipeline(): Promise<{
         }
       }
 
-      // 4. Mark all stories in this batch as processed
-      processedIds.push(...batch.map((s) => s.id))
-
-      console.log(`[Filter] Batch ${Math.floor(i / BATCH_SIZE) + 1}: scored ${results.length}, stored ${toInsert.length}`)
+      console.log(
+        `[Filter] Batch ${Math.floor(i / BATCH_SIZE) + 1}: parsed ${results.length}, marked ${markRows.length}, stored ${toInsert.length}`
+      )
     } catch (err) {
       console.error(`[Filter] Batch ${Math.floor(i / BATCH_SIZE) + 1} failed:`, err)
-      // Continue with next batch — don't mark as processed so they retry
     }
   }
 
-  // 5. Mark stories as processed
-  if (processedIds.length > 0) {
-    await supabaseAdmin
-      .from('raw_stories')
-      .update({ processed: true })
-      .in('id', processedIds)
-  }
-
-  // 6. Log token usage
-  // Haiku pricing: $0.80/M input, $4.00/M output (as of 2024)
   const estimatedCost =
-    (totalInputTokens / 1_000_000) * 0.8 +
-    (totalOutputTokens / 1_000_000) * 4.0
+    (totalInputTokens / 1_000_000) * 0.8 + (totalOutputTokens / 1_000_000) * 4.0
 
   await supabaseAdmin.from('api_usage').insert({
-    stories_scored: processedIds.length,
+    user_id: ctx.userId,
+    stories_scored: totalMarked,
     input_tokens: totalInputTokens,
     output_tokens: totalOutputTokens,
     estimated_cost: estimatedCost,
   })
 
   console.log(
-    `[Filter] Done. Processed: ${processedIds.length}, Stored: ${totalStored}, Tokens: ${totalInputTokens}in/${totalOutputTokens}out, Cost: $${estimatedCost.toFixed(5)}`
+    `[Filter] Done. Marked: ${totalMarked}, Stored: ${totalStored}, Tokens: ${totalInputTokens}in/${totalOutputTokens}out`
   )
 
   return {
-    processed: processedIds.length,
+    processed: totalMarked,
     stored: totalStored,
     totalInputTokens,
     totalOutputTokens,

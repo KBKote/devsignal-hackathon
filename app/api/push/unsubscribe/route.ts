@@ -1,7 +1,13 @@
 import { NextResponse } from 'next/server'
+import { getSessionUser } from '@/lib/auth/session'
 import { supabaseAdmin } from '@/lib/supabase-server'
 
 export async function POST(req: Request) {
+  const user = await getSessionUser()
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   try {
     const { endpoint } = await req.json()
 
@@ -13,6 +19,7 @@ export async function POST(req: Request) {
       .from('push_subscriptions')
       .delete()
       .eq('endpoint', endpoint)
+      .eq('user_id', user.id)
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 })

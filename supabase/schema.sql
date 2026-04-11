@@ -1,83 +1,145 @@
--- Signal App — Database Schema
--- Run this in the Supabase SQL editor to create all tables
+-- Signal App — Database Schema (multi-user + BYOK)
+-- Run in Supabase SQL editor. Prefer migrations/ for incremental updates.
 
 -- ─────────────────────────────────────────────
--- 1. raw_stories
---    Everything scraped, before filtering
+-- raw_stories — shared scrape pool (no user_id)
 -- ─────────────────────────────────────────────
-create table if not exists raw_stories (
-  id           uuid primary key default gen_random_uuid(),
-  title        text not null,
-  url          text unique not null,
-  source       text,          -- 'coindesk', 'reddit/ethereum', 'hn', etc.
-  raw_text     text,          -- cleaned body text, no HTML
-  published_at timestamptz,
-  scraped_at   timestamptz default now(),
-  processed    boolean default false
-);
-
--- ─────────────────────────────────────────────
--- 2. scored_stories
---    Filtered + scored by Claude Haiku
--- ─────────────────────────────────────────────
-create table if not exists scored_stories (
-  id           uuid primary key default gen_random_uuid(),
-  raw_story_id uuid references raw_stories(id) on delete cascade,
-  title        text not null,
-  url          text not null,
+CREATE TABLE IF NOT EXISTS raw_stories (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  title        text NOT NULL,
+  url          text UNIQUE NOT NULL,
   source       text,
-  summary      text,          -- Claude's 2-sentence summary
-  category     text check (category in ('opportunity', 'idea', 'intel')),
-  score        int check (score between 1 and 10),
-  why          text,          -- Claude's reasoning (shown on expand)
+  raw_text     text,
   published_at timestamptz,
-  scored_at    timestamptz default now(),
-  seen         boolean default false,
-  notified     boolean default false
+  scraped_at   timestamptz DEFAULT now()
 );
 
+CREATE INDEX IF NOT EXISTS idx_raw_stories_scraped_at ON raw_stories (scraped_at DESC);
+
+ALTER TABLE raw_stories ENABLE ROW LEVEL SECURITY;
+
 -- ─────────────────────────────────────────────
--- 3. api_usage
---    Token tracking per run (cost monitoring)
+-- scored_stories — per user_id
 -- ─────────────────────────────────────────────
-create table if not exists api_usage (
-  id              uuid primary key default gen_random_uuid(),
-  run_at          timestamptz default now(),
+CREATE TABLE IF NOT EXISTS scored_stories (
+  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      uuid REFERENCES auth.users (id) ON DELETE CASCADE,
+  raw_story_id uuid REFERENCES raw_stories (id) ON DELETE CASCADE,
+  title        text NOT NULL,
+  url          text NOT NULL,
+  source       text,
+  summary      text,
+  category     text CHECK (category IN ('opportunity', 'idea', 'intel')),
+  score        int CHECK (score BETWEEN 1 AND 10),
+  why          text,
+  published_at timestamptz,
+  scored_at    timestamptz DEFAULT now(),
+  seen         boolean DEFAULT false,
+  notified     boolean DEFAULT false
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS scored_stories_user_raw_unique
+  ON scored_stories (user_id, raw_story_id)
+  WHERE raw_story_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_scored_stories_user_id ON scored_stories (user_id);
+CREATE INDEX IF NOT EXISTS idx_scored_stories_score ON scored_stories (score DESC);
+CREATE INDEX IF NOT EXISTS idx_scored_stories_category ON scored_stories (category);
+CREATE INDEX IF NOT EXISTS idx_scored_stories_scored_at ON scored_stories (scored_at DESC);
+CREATE INDEX IF NOT EXISTS idx_scored_stories_seen ON scored_stories (seen);
+
+ALTER TABLE scored_stories ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users read own scored_stories" ON scored_stories;
+CREATE POLICY "Users read own scored_stories"
+  ON scored_stories FOR SELECT TO authenticated
+  USING (auth.uid() = user_id);
+
+-- ─────────────────────────────────────────────
+-- api_usage
+-- ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS api_usage (
+  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         uuid REFERENCES auth.users (id) ON DELETE SET NULL,
+  run_at          timestamptz DEFAULT now(),
   stories_scored  int,
   input_tokens    int,
   output_tokens   int,
-  estimated_cost  numeric(10,6)  -- in USD
+  estimated_cost  numeric(10, 6)
 );
 
--- ─────────────────────────────────────────────
--- 4. user_profiles
---    Built for multi-user later; single row for now
--- ─────────────────────────────────────────────
-create table if not exists user_profiles (
-  id         uuid primary key default gen_random_uuid(),
-  name       text default 'default',
-  profile    jsonb,           -- serialized user profile
-  created_at timestamptz default now()
-);
+CREATE INDEX IF NOT EXISTS idx_api_usage_user_id ON api_usage (user_id);
+
+ALTER TABLE api_usage ENABLE ROW LEVEL SECURITY;
 
 -- ─────────────────────────────────────────────
--- 5. push_subscriptions
---    Web Push subscriptions for notifications
+-- user_profiles — onboarding json keyed by auth user
 -- ─────────────────────────────────────────────
-create table if not exists push_subscriptions (
-  id         uuid primary key default gen_random_uuid(),
-  endpoint   text unique not null,
-  p256dh     text not null,
-  auth       text not null,
-  created_at timestamptz default now()
+CREATE TABLE IF NOT EXISTS user_profiles (
+  user_id               uuid PRIMARY KEY REFERENCES auth.users (id) ON DELETE CASCADE,
+  profile               jsonb NOT NULL DEFAULT '{}'::jsonb,
+  onboarding_completed  boolean NOT NULL DEFAULT false,
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users manage own user_profiles" ON user_profiles;
+CREATE POLICY "Users manage own user_profiles"
+  ON user_profiles FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
 -- ─────────────────────────────────────────────
--- Indexes
+-- user_api_credentials — encrypted Anthropic key
 -- ─────────────────────────────────────────────
-create index if not exists idx_raw_stories_processed    on raw_stories(processed);
-create index if not exists idx_raw_stories_scraped_at   on raw_stories(scraped_at desc);
-create index if not exists idx_scored_stories_score     on scored_stories(score desc);
-create index if not exists idx_scored_stories_category  on scored_stories(category);
-create index if not exists idx_scored_stories_scored_at on scored_stories(scored_at desc);
-create index if not exists idx_scored_stories_seen      on scored_stories(seen);
+CREATE TABLE IF NOT EXISTS user_api_credentials (
+  user_id                  uuid PRIMARY KEY REFERENCES auth.users (id) ON DELETE CASCADE,
+  anthropic_key_ciphertext text NOT NULL,
+  anthropic_key_iv         text NOT NULL,
+  updated_at               timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE user_api_credentials ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users manage own user_api_credentials" ON user_api_credentials;
+CREATE POLICY "Users manage own user_api_credentials"
+  ON user_api_credentials FOR ALL TO authenticated
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+-- ─────────────────────────────────────────────
+-- push_subscriptions
+-- ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    uuid REFERENCES auth.users (id) ON DELETE CASCADE,
+  endpoint   text UNIQUE NOT NULL,
+  p256dh     text NOT NULL,
+  auth       text NOT NULL,
+  created_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions (user_id);
+
+ALTER TABLE push_subscriptions ENABLE ROW LEVEL SECURITY;
+
+-- ─────────────────────────────────────────────
+-- user_raw_scored — per-user completion for raw rows (incl. noise)
+-- ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS user_raw_scored (
+  user_id      uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
+  raw_story_id uuid NOT NULL REFERENCES raw_stories (id) ON DELETE CASCADE,
+  scored_at    timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, raw_story_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_raw_scored_user ON user_raw_scored (user_id);
+
+ALTER TABLE user_raw_scored ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users read own user_raw_scored" ON user_raw_scored;
+CREATE POLICY "Users read own user_raw_scored"
+  ON user_raw_scored FOR SELECT TO authenticated
+  USING (auth.uid() = user_id);

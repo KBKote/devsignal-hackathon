@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { scrapeUnauthorizedResponse } from '@/lib/scrape-auth'
 import { scrapeRssFeeds } from '@/lib/scraper/rss'
 import { scrapeReddit } from '@/lib/scraper/reddit'
 import { scrapeHackerNews } from '@/lib/scraper/hn'
@@ -6,7 +7,10 @@ import { supabaseAdmin } from '@/lib/supabase-server'
 
 export const maxDuration = 60 // Vercel function timeout (seconds)
 
-export async function POST() {
+export async function POST(request: Request) {
+  const denied = scrapeUnauthorizedResponse(request)
+  if (denied) return denied
+
   const startTime = Date.now()
 
   try {
@@ -69,7 +73,7 @@ export async function POST() {
   }
 }
 
-// Allow GET for easy browser/cron testing
-export async function GET() {
-  return POST()
+// GET for Vercel Cron (same auth as POST)
+export async function GET(request: Request) {
+  return POST(request)
 }

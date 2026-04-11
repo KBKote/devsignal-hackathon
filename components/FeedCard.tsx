@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { memo, useState } from 'react'
 
 export interface Story {
   id: string
@@ -60,7 +60,7 @@ function timeAgo(dateStr: string | null): string {
   return `${m}m ago`
 }
 
-export function FeedCard({ story }: { story: Story }) {
+export const FeedCard = memo(function FeedCard({ story }: { story: Story }) {
   const [expanded, setExpanded] = useState(false)
   const cat = CATEGORY_STYLES[story.category]
 
@@ -120,4 +120,4 @@ export function FeedCard({ story }: { story: Story }) {
       </div>
     </article>
   )
-}
+})

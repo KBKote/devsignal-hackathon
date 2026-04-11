@@ -1,8 +1,6 @@
-import { createClient } from '@supabase/supabase-js'
+/**
+ * Browser Supabase client (singleton). Prefer `createSupabaseBrowserClient` from `./supabase/client` if you need a fresh instance.
+ */
+import { createSupabaseBrowserClient } from './supabase/client'
 
-// Public client — safe to use in browser/client components
-// NEXT_PUBLIC_* vars are inlined at build time and available everywhere
-export const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+export const supabase = createSupabaseBrowserClient()

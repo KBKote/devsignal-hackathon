@@ -14,6 +14,7 @@ A personalized web app that scrapes the internet (RSS feeds, Reddit, Hacker News
 ## Commands
 ```bash
 npm run dev        # Start local development server (localhost:3000)
+npm run tunnel     # Public HTTPS URL via Cloudflare quick tunnel (run in a second terminal; needs dev on :3000)
 npm run build      # Build for production
 npm run lint       # Run ESLint
 npx supabase start # Start local Supabase instance (if using local dev)
@@ -27,10 +28,12 @@ signal/
 │   ├── agents/                # Sub-agent definitions
 │   │   ├── scraper.md         # Handles data collection from all sources
 │   │   ├── filter.md          # Handles Claude AI scoring and filtering
-│   │   └── briefing.md        # Handles formatting and delivery
+│   │   ├── briefing.md        # Handles formatting and delivery
+│   │   └── security-performance-audit.md  # Report-only audit workflow
 │   └── commands/              # Custom slash commands
 │       ├── scrape.md          # /scrape — manually trigger a data collection run
-│       └── brief.md           # /brief — generate a fresh briefing on demand
+│       ├── brief.md           # /brief — generate a fresh briefing on demand
+│       └── audit.md           # /audit — security + performance report
 ├── app/                       # Next.js App Router pages
 │   ├── page.tsx               # Main feed page
 │   ├── layout.tsx             # Root layout
@@ -54,19 +57,23 @@ signal/
 
 ## Architecture: How Data Flows
 ```
-[Cron: every 4 hours]
+[Public `/`] → product copy + Log in / Sign up → `/login` → BYOK in `/settings` → `/feed` (onboarding page optional / later)
+[Supabase Auth] → session (cookie) → protected /feed, /settings, /onboarding
        ↓
-[Scraper Agent] → fetches RSS + Reddit + HN → raw_stories table
+[Cron: every 4 hours] (scrape only — filter is on-demand per user with BYOK)
        ↓
-[Filter Agent]  → batches stories → Claude Haiku scores each → scored_stories table
+[Scraper]       → fetches RSS + Reddit + HN → shared raw_stories pool
        ↓
-[Web App]       → reads scored_stories → displays by category
+[User: Run Pipeline] → decrypt their Anthropic key → Claude Haiku batches → scored_stories (per user_id)
        ↓
-[Push Notif]    → fires if Opportunity score > 8/10
+[Web App]       → /api/stories (session) → feed by category
+       ↓
+[Push Notif]    → user’s subscriptions → high-score opportunities for that user
 ```
+Operator secrets (Supabase service role, `SECRETS_ENCRYPTION_KEY`, scrape keys) stay in deployment env — never embedded for end users. End users configure **their** Anthropic key in Settings (encrypted at rest).
 
 ## The User Profile (What Claude Uses to Filter)
-Stored in `lib/user-profile.ts`. This is the core of why this app is different from a regular news aggregator. Claude scores every story against this profile.
+Onboarding answers live in `user_profiles.profile` (JSON). `lib/user-profile-prompt.ts` merges them with defaults from `lib/user-profile.ts` for the scoring prompt.
 
 Key profile attributes:
 - 3-4 years crypto experience, Ethereum ecosystem focus
@@ -153,26 +160,66 @@ Key profile attributes:
 - Fix: copied the exact project `mcpServers` block into global `~/.cursor/mcp.json`.
 - **Pattern: when an MCP server should be reusable across projects, keep project and global MCP configs in sync.**
 
+### Build 2 — Public auth landing, email/password, setup wizard order
+
+**BUG 10: `/` stuck forever on “Loading…” (auth form never appeared)**
+- Symptom: Only the loading string rendered; E2E could not find `#auth-email`.
+- Root cause (A): `useSearchParams()` in the root client entry kept the page inside a Suspense boundary that did not resolve reliably in some environments.
+- Fix: read `searchParams` in the **server** page and pass props into client children (e.g. `/auth/continue` → `AuthContinueClient`). Public `/` is **server-rendered**: `getSessionUser()` + `getServerPostAuthDestination()` then `redirect` or static `MarketingBody` — no client auth gate (avoids infinite “Loading…” when `getUser()` never settles in automation).
+- Root cause (B): `supabase.auth.getUser()` stayed pending when the browser could not reach Supabase (blocked or flaky network), so `setChecked(true)` never ran.
+- Fix: `Promise.race` the auth call against an ~8s timeout; on timeout or failure, treat as signed out and show the landing UI.
+
+**BUG 11: Puppeteer / manual tests hit the wrong Next process**
+- Symptom: UI did not reflect the latest code after edits.
+- Root cause: a second `next dev` bound to another port while port 3000 was still held by an older dev server; tests kept using `localhost:3000`.
+- Fix: stop duplicate PIDs or run a **production** server on a fixed port (`PORT=3010 npm run start` after `npm run build`) when verifying with automation.
+
+**Note:** Supabase may reject some synthetic sign-up emails (e.g. `*@example.com`) as invalid — use a real mailbox domain in QA.
+
+**Next.js 16:** `middleware.ts` is deprecated → use root **`proxy.ts`** with exported **`proxy`** (same `config.matcher`). Removes IDE/build warning `middleware-to-proxy`.
+
+**BUG 14: App works on `localhost` but breaks on Cloudflare quick tunnel**
+- Symptom: Tunnel URL loads or partially works; auth redirects go to `http://localhost:3000` on phone / tunnel host.
+- Root cause: Behind `cloudflared`, Node still sees `request.url` as `http://localhost:3000`; `NextResponse.redirect` built from `nextUrl` used that origin.
+- Fix: `lib/request-origin.ts` — `getPublicOrigin(request)` uses **`X-Forwarded-Host`** / **`X-Forwarded-Proto`** when present. Use in **`proxy.ts`** (login redirect) and **`/auth/callback`**. Logged-in **`/`** uses **`getPublicOriginFromHeaders(headers())`** for `redirect()`.
+- Still required: Supabase **Redirect URLs** must include `https://<your-tunnel>.trycloudflare.com/auth/callback` (and Site URL when testing only via tunnel).
+
+**BUG 13: Login “loop” — credentials clear, bounce back to `/login`**
+- Symptom: After Log in, brief navigation then back to empty login form (or endless repeat).
+- Root cause: `router.replace()` after `signInWithPassword` raced Supabase cookie persistence; the next server request (proxy / RSC) saw no session and redirected to `/login?redirect=…`.
+- Fix: after successful sign-in, use **`window.location.assign(next)`** (same as sign-up with session), not App Router `router.replace`.
+
+**BUG 12: `/` stuck on “Loading…” in Puppeteer / some browsers**
+- Symptom: E2E never saw marketing copy; body text stayed `Loading…` even after 10s+.
+- Root cause: client-only `MarketingOrRedirect` waited on `supabase.auth.getUser()`; when that request hung (throttled timers, flaky network, or blocked third-party calls), `checked` never flipped true.
+- Fix: **`app/page.tsx`** is a Server Component — `getSessionUser()` + `getServerPostAuthDestination()` → `redirect`, else render **`MarketingBody`** immediately (`lib/auth/post-auth-redirect-server.ts`).
+
+**Setup path (product order):** sign up / log in → **`/settings`** (Anthropic BYOK) → **`/feed`**. Optional **`/onboarding`** exists for future profile questions; not required in redirects. Implemented with `lib/auth/post-auth-navigation.ts`.
+
 **WORKING PATTERNS:**
 - Claude Haiku JSON scoring prompt: ask for a plain JSON array, no markdown fences. Then strip any accidental fences with `.replace(/^```json\s*/i, '')` before `JSON.parse`. Prevents parse failures if the model adds fences anyway.
 - Supabase `upsert` with `{ onConflict: 'url', ignoreDuplicates: true }` is the right call for deduplication in both scrapers and scored stories — don't use `insert` which throws on duplicate key.
-- Vercel cron: scrape at `:00` of every 4th hour, filter at `:15` — gives the scraper 15 minutes to finish before the filter tries to read new stories.
+- Per-run filter prefs (topic emphasis + focus calibration) are sent as JSON `POST` to `/api/filter`; `GET` (e.g. Vercel cron) omits a body and uses default prefs in `lib/pipeline-preferences.ts`.
+- Vercel cron: scrape only at `:00` of every 4th hour (BYOK filter is on-demand per user, not cron).
 - Verification loop that worked well: run live app -> capture screenshot -> compare expected UI -> inspect API/DB state -> patch -> lint -> screenshot again.
 - Fast diagnosis pattern: compare the same query with anon key vs service-role key; a large count mismatch immediately identifies access-layer issues (not ingestion/filter bugs).
 
 ## Database Tables
 ```sql
-raw_stories         -- everything scraped, before filtering
-scored_stories      -- filtered + scored by Claude, displayed in UI
-api_usage           -- token tracking per run (cost monitoring)
-user_profiles       -- user preferences (built for multi-user later)
-push_subscriptions  -- Web Push endpoint/key pairs for notifications
+raw_stories           -- shared scraped pool (no user_id)
+user_raw_scored       -- which raw rows each user has already scored
+scored_stories        -- per-user filtered + scored stories (user_id)
+user_api_credentials  -- encrypted Anthropic key (BYOK)
+api_usage             -- token tracking per run (optional user_id)
+user_profiles         -- onboarding + prefs (user_id = auth.users)
+push_subscriptions    -- Web Push per user_id
 ```
 Full schema in `supabase/schema.sql` — run this in Supabase SQL editor to create all tables.
 
 ## Environment Variables (.env.local)
 ```
-ANTHROPIC_API_KEY=
+ANTHROPIC_API_KEY=              # optional operator fallback; users use Settings (BYOK)
+SECRETS_ENCRYPTION_KEY=         # required for storing user keys (openssl rand -base64 32)
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
@@ -184,12 +231,15 @@ Generate VAPID keys once with: `npx web-push generate-vapid-keys`
 Template is in `.env.local.example` — copy and fill in.
 
 ## Sub-Agents
-This project uses three specialized Claude sub-agents defined in `.claude/agents/`:
+This project uses specialized Claude sub-agents defined in `.claude/agents/`:
 
 | Agent | Role | When to invoke |
 |-------|------|----------------|
 | `scraper` | Fetches and parses all data sources | When adding a new source or debugging collection |
 | `filter` | Manages Claude API filtering logic | When tuning scoring, adding categories |
 | `briefing` | Formats and delivers output | When changing UI layout or notification logic |
+| `security-performance-audit` | Report-only security + performance audit (see `.cursor/skills/security-performance-audit/SKILL.md`) | When you want a vulnerability/efficiency assessment without automatic code changes |
 
-Invoke a sub-agent by saying: "Act as the scraper agent" or use the slash commands.
+Invoke a sub-agent by saying: "Act as the scraper agent" or use the slash commands (`/scrape`, `/brief`, `/audit`, etc.).
+
+**Cursor:** the same audit workflow is available as the project skill `security-performance-audit` under `.cursor/skills/`.
