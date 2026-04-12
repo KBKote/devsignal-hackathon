@@ -124,6 +124,28 @@ Key profile attributes:
 
 **WORKING PATTERN — source broadening:** Expanded [`RSS_FEEDS_BASE`](lib/scrape-sources.ts) to **22** feeds and [`REDDIT_BASE`](lib/scrape-sources.ts) to **11** subreddits; broadened [`HN_QUERY_DEFAULT`](lib/scrape-sources.ts); set `FILTER_RAW_FETCH_LIMIT=800`, `FILTER_MAX_CANDIDATES=150`. Target: **300–400** raw stories/day vs prior **~80–150**.
 
+**WORKING PATTERN — Haiku batch JSON recovery and throughput:** [`lib/filter.ts`](lib/filter.ts) runs **two** `scoreBatch` calls in parallel per wave (`BATCH_CONCURRENCY = 2`). **`max_tokens: 8192`** avoids truncating large batches (~30 items × long summaries). Parsing uses **`tryParseScoredArray`**: direct `JSON.parse`, unwrap common object wrappers (`stories`, `results`, `items`, `scores`), then **`extractJsonArrayStringAware`** so brackets inside JSON strings do not break depth counting. On failure, log **`stop_reason`** and **`output_tokens`**, and surface **`parseFailureBatchIndices`** in [`app/api/filter/route.ts`](app/api/filter/route.ts). Keep **`runFilterPipeline`** return shape in sync with that route or TypeScript build fails.
+
+**WORKING PATTERN — feed freshness (`published_at`):** Env **`FEED_MAX_AGE_DAYS`** (default **7**, cap **30** in filter via `intEnv`): [`lib/filter.ts`](lib/filter.ts) skips raw candidates older than the window (missing **`published_at`** still scores). [`app/api/stories/route.ts`](app/api/stories/route.ts) applies the same window on the **REST** path with **`.or(published_at.is.null,published_at.gte…)`**; **`api_scored_stories_page`** RPC does not yet filter by `published_at` — server logs note the gap until a migration extends the RPC.
+
+**WORKING PATTERN — budget toggle (Light/Standard/Deep):** Replaced raw `maxCandidates` + `batchSize` selects with three preset buttons in [`components/PipelinePreferences.tsx`](components/PipelinePreferences.tsx). Presets defined in [`lib/pipeline-preferences.ts`](lib/pipeline-preferences.ts) as `BUDGET_PRESET_TUNING`: Light (40 candidates, 20 batch), Standard (80, 24), Deep (150, 30). `matchBudgetPreset(tuning)` returns the active preset or null for custom. `PipelineRunTuning` type unchanged — presets just write into it.
+
+**WORKING PATTERN — token usage panel:** [`app/feed/page.tsx`](app/feed/page.tsx) reads `totalInputTokens`, `totalOutputTokens`, `estimatedCost`, `stored` from the `/api/filter` JSON response and stores in `lastRunStats` state. Displayed in the right sidebar panel below "Stories loaded" and "Last update". Only appears after the first pipeline run (state starts null).
+
+**OBSERVATION — topic mode UX problem:** Topic modes (Macro & Markets, Developer & Infra, etc.) only produce good results if the raw story pool contains matching content. The pool is currently AI/crypto-heavy (22 RSS feeds + 11 subreddits all in that niche). Switching to "Macro & Markets" correctly penalizes AI stories but finds almost no macro content to surface — returns 1-13 stories of wrong type. **Decision pending:** may remove topic mode selector entirely and rely solely on `scoring_markdown` for personalization, keeping only scope (precise/balanced/expansive). Do not add more topic modes without first adding matching sources.
+
+**OBSERVATION — pool depletion pattern:** `user_raw_scored` permanently marks every scored story. After multiple pipeline runs, the candidate pool empties and runs return 0-5 stories even with Deep budget. Fix: run the scraper first (Step 1 of pipeline) to replenish `raw_stories` with fresh content before scoring. This is expected behavior, not a bug.
+
+**OBSERVATION — token cost breakdown:** Output tokens are 5× more expensive than input ($4/M vs $0.80/M). For a standard run (~26K input + ~15K output), output is 74% of cost. Highest-ROI optimization: tighten `why` to max 12 words and `summary` to max 20 words in the `scoreBatch` prompt. Estimated saving: 30-40% on output tokens, bringing standard run from ~$0.08 to ~$0.04-0.05. Not yet implemented.
+
+**ROADMAP — next session priorities:**
+1. **Nitter Twitter integration** — scrape curated list of 20-30 high-signal crypto/MEV/DeFi accounts via Nitter RSS (free, no API key). Use multiple fallback Nitter instances. Wire into existing RSS scraper infrastructure. Topic-specific account packs. Goal: catch opportunities like the Polymarket 12-second delay that surface on Twitter 2-3 days before RSS/Reddit.
+2. **Settings page UX overhaul** — edit `scoring_markdown` in a textarea (no file editing), redo questionnaire button (re-runs Sonnet synthesis), danger zone section (move "Reset scoring progress" here from feed), last run summary, source counts display, Anthropic key test button.
+3. **"Keep me logged in"** checkbox on login form — default 24h session expiry, opt-in 30-day. Requires Supabase session config change + `signInWithPassword` options.
+4. **Visual shader consistency** — carry the radial gradient blob from the home page through feed and settings pages. Different direction/color per page for variety.
+5. **Token efficiency** — tighten `why` and `summary` word limits in scoring prompt (see observation above).
+6. **Custom SMTP** — configure a third-party SMTP provider (e.g. Resend, Postmark, or SendGrid) in Supabase Auth settings to replace the built-in mailer. Goal: lift the Supabase free-tier email limits (3 emails/hour) so verification and magic-link emails are reliable at scale.
+
 - When Claude makes a mistake in code, document the exact mistake here immediately.
 - Add the failed prompt, reasoning, or pattern that produced the bug so we know not to repeat it.
 - If a fix or a working prompt/approach is found, add that too with a short note on why it worked.
@@ -262,6 +284,7 @@ Template is in `.env.local.example` — copy and fill in.
 FILTER_RAW_FETCH_LIMIT=800     # cap 800 — raw_stories rows considered per filter run (Phase 4 default in .env.local)
 FILTER_MAX_CANDIDATES=150      # cap 200 — max unscored candidates scored per run
 FILTER_BATCH_SIZE=24           # cap 40 — Haiku batch size (clamped to max candidates)
+FEED_MAX_AGE_DAYS=7            # max age in days for scoring + REST feed by published_at (filter uses intEnv 1–30; stories route parseInt, default 7)
 ```
 
 ## Hosted Supabase checklist (migrations)
