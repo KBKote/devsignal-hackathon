@@ -32,25 +32,6 @@ function mapTestKeyError(error: string): string {
   }
 }
 
-function mapSynthErrorKey(error: string, detail?: string): string {
-  switch (error) {
-    case 'add_key_first':
-      return 'Add your Anthropic API key in Settings first.'
-    case 'verify_email_first':
-      return 'Verify your email before re-running synthesis.'
-    case 'missing_profile_model':
-      return 'Profile synthesis is not configured on the server (missing ANTHROPIC_PROFILE_MODEL).'
-    case 'synthesis_failed':
-      return 'Synthesis did not produce a valid profile. Try again or update your answers in Onboarding.'
-    case 'synthesis_request_failed':
-      return 'Could not reach Anthropic. Check your key and try again.'
-    case 'invalid_answers':
-      return detail ? `Invalid questionnaire data: ${detail}` : 'Stored questionnaire answers are invalid. Re-do onboarding.'
-    default:
-      return error
-  }
-}
-
 export default function SettingsPage() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
@@ -64,11 +45,8 @@ export default function SettingsPage() {
   const [profileLoading, setProfileLoading] = useState(true)
   const [profileSaving, setProfileSaving] = useState(false)
   const [profileMessage, setProfileMessage] = useState('')
-  const [questionnaireAnswers, setQuestionnaireAnswers] = useState<unknown>(null)
   const [lastRun, setLastRun] = useState<LastRunPayload>(null)
   const [lastRunLoading, setLastRunLoading] = useState(true)
-  const [synthesizing, setSynthesizing] = useState(false)
-  const [synthMessage, setSynthMessage] = useState('')
   const [resettingProgress, setResettingProgress] = useState(false)
   const [resetMessage, setResetMessage] = useState('')
   const [deletingAccount, setDeletingAccount] = useState(false)
@@ -95,14 +73,8 @@ export default function SettingsPage() {
       if (prRes.ok) {
         const pj = (await prRes.json()) as {
           scoring_markdown?: string | null
-          questionnaire_answers?: unknown
         }
         setScoringMd(typeof pj.scoring_markdown === 'string' ? pj.scoring_markdown : '')
-        setQuestionnaireAnswers(
-          pj.questionnaire_answers !== undefined && pj.questionnaire_answers !== null
-            ? pj.questionnaire_answers
-            : null
-        )
       }
       setProfileLoading(false)
 
@@ -200,43 +172,6 @@ export default function SettingsPage() {
     }
   }
 
-  async function redoQuestionnaireSynthesis() {
-    setSynthMessage('')
-    if (questionnaireAnswers === null || typeof questionnaireAnswers !== 'object') {
-      setSynthMessage('No saved questionnaire answers. Complete onboarding first.')
-      return
-    }
-    setSynthesizing(true)
-    try {
-      const res = await fetch('/api/onboarding/synthesize-profile', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(questionnaireAnswers),
-      })
-      const j = (await res.json().catch(() => ({}))) as {
-        error?: string
-        detail?: string
-        scoring_markdown?: string
-      }
-      if (!res.ok) {
-        const key = typeof j.error === 'string' ? j.error : 'Request failed'
-        setSynthMessage(mapSynthErrorKey(key, typeof j.detail === 'string' ? j.detail : undefined))
-        return
-      }
-      const pr = await fetch('/api/settings/profile', { credentials: 'include' })
-      if (pr.ok) {
-        const pj = (await pr.json()) as { scoring_markdown?: string | null }
-        setScoringMd(typeof pj.scoring_markdown === 'string' ? pj.scoring_markdown : '')
-      } else if (typeof j.scoring_markdown === 'string') {
-        setScoringMd(j.scoring_markdown)
-      }
-      setSynthMessage('Profile re-synthesized. Review the scoring profile above and save if you edit it.')
-    } finally {
-      setSynthesizing(false)
-    }
-  }
-
   async function resetScoringProgress() {
     setResetMessage('')
     if (!hasKey) return
@@ -292,9 +227,6 @@ export default function SettingsPage() {
       setDeletingAccount(false)
     }
   }
-
-  const canRedoSynthesis =
-    questionnaireAnswers !== null && questionnaireAnswers !== undefined && typeof questionnaireAnswers === 'object'
 
   if (loading) {
     return (

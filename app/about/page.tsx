@@ -59,7 +59,7 @@ export default function AboutPage() {
                 protocol vulnerability that shifts market dynamics before anyone prices it in.
               </p>
               <p className="mt-4 text-base leading-relaxed text-zinc-300">
-                Not because the information isn't public. It is. It's buried in hundreds of RSS feeds,
+                Not because the information is not public. It is. It is buried in hundreds of RSS feeds,
                 Reddit threads, Hacker News posts, and forum discussions that nobody has time to
                 actually read.
               </p>

@@ -247,7 +247,8 @@ export default function DocsPage() {
                       <p>
                         Stories are batched (~24 per call) and scored by <Code>claude-haiku-4-5</Code> using
                         your <Code>scoring_markdown</Code> profile as the scoring rubric. Each story gets a
-                        score 1–10, a category (opportunity / idea / intel / noise), and a brief "why it matters."
+                        score 1–10, a category (opportunity / idea / intel / noise), and a brief{' '}
+                        <span className="text-zinc-200">&ldquo;why it matters&rdquo;</span>.
                       </p>
                     </div>
                     <div>
@@ -255,7 +256,7 @@ export default function DocsPage() {
                       <p>
                         Stories scoring ≥ 5 are stored in <Code>scored_stories</Code>. Noise (score 1–4) is
                         discarded. All scored raw story IDs are recorded in <Code>user_raw_scored</Code> so
-                        they're never scored again.
+                        they&apos;re never scored again.
                       </p>
                     </div>
                   </div>
@@ -289,8 +290,8 @@ export default function DocsPage() {
                   Haiku sees when scoring your feed.
                 </p>
                 <p className="text-sm leading-relaxed text-zinc-400">
-                  The profile includes: who you are, what you're building, ecosystem focus, must-score-high /
-                  must-score-low lists, knowledge baseline (so Haiku doesn't explain things you already know),
+                  The profile includes: who you are, what you&apos;re building, ecosystem focus, must-score-high /
+                  must-score-low lists, knowledge baseline (so Haiku doesn&apos;t explain things you already know),
                   and a scoring rubric calibrated to your goals.
                 </p>
                 <p className="text-sm leading-relaxed text-zinc-400">
@@ -322,7 +323,7 @@ export default function DocsPage() {
             <Section id="vector-search" label="Vector Search">
               <div className="rounded-2xl border border-white/8 bg-white/[0.03] p-6 space-y-4">
                 <p className="text-sm leading-relaxed text-zinc-300">
-                  Dev Signal uses pgvector (Supabase's vector extension) to pre-select the most
+                  Dev Signal uses pgvector (Supabase&apos;s vector extension) to pre-select the most
                   semantically relevant candidates before scoring. This improves result quality and
                   reduces Haiku token usage by only scoring stories that are actually relevant to your
                   profile.

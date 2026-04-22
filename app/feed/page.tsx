@@ -84,7 +84,6 @@ export default function LiveFeedPage() {
   const [stories, setStories] = useState<Story[]>([])
   const [category, setCategory] = useState<Category>('all')
   const [loading, setLoading] = useState(true)
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [runningPipeline, setRunningPipeline] = useState(false)
   const [scrapingFresh, setScrapingFresh] = useState(false)
   const [pipelineMessage, setPipelineMessage] = useState('Ready.')
@@ -221,7 +220,6 @@ export default function LiveFeedPage() {
     setStories((payload.stories as Story[]) ?? [])
     setHasMoreStories(Boolean(payload.hasMore))
     setStoriesNextCursor(typeof payload.nextCursor === 'string' ? payload.nextCursor : null)
-    setLastUpdated(new Date())
     setLoading(false)
     return true
   }, [])
