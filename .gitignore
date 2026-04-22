@@ -46,3 +46,14 @@ lighthouse-report.json
 # Cursor agent debug NDJSON (written by dev-only API routes)
 .cursor/debug*.log
 .cursor/playwright-mcp.log
+
+# Playwright MCP session files (dev screenshots, page snapshots, console logs)
+.playwright-mcp/
+
+# Development screenshots and artifacts
+artifacts/
+*.png
+
+# Personal dev notes
+daily-changes.cursor.md
+NOTES.md
