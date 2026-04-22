@@ -1,6 +1,7 @@
 'use client'
 
 import { memo, useState } from 'react'
+import { GlowCard } from '@/components/ui/spotlight-card'
 
 export interface Story {
   id: string
@@ -22,14 +23,17 @@ const CATEGORY_STYLES = {
   opportunity: {
     label: 'Opportunity',
     badge: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
+    glow: 'green' as const,
   },
   idea: {
     label: 'Idea',
     badge: 'border-sky-500/30 bg-sky-500/10 text-sky-300',
+    glow: 'blue' as const,
   },
   intel: {
     label: 'Intel',
     badge: 'border-white/15 bg-white/5 text-zinc-300',
+    glow: 'purple' as const,
   },
 }
 
@@ -88,7 +92,7 @@ export const FeedCard = memo(function FeedCard({ story }: { story: Story }) {
   const cat = CATEGORY_STYLES[story.category]
 
   return (
-    <article className="rounded-xl border border-white/10 bg-black/50 p-5 text-zinc-100 backdrop-blur-md transition-colors hover:border-white/20">
+    <GlowCard customSize glowColor={cat.glow} className="w-full p-5 text-zinc-100 rounded-xl">
       <div className="flex items-start gap-4">
         <div className="flex-shrink-0 pt-0.5">
           <ScoreBadge score={story.score} />
@@ -132,6 +136,6 @@ export const FeedCard = memo(function FeedCard({ story }: { story: Story }) {
           )}
         </div>
       </div>
-    </article>
+    </GlowCard>
   )
 })

@@ -56,9 +56,9 @@ export const BUDGET_PRESET_TUNING: Record<BudgetPreset, PipelineRunTuning> = {
 }
 
 export const BUDGET_PRESET_LABELS: Record<BudgetPreset, { label: string; hint: string }> = {
-  light: { label: 'Light', hint: '~40 stories · ~2 batches · fastest' },
-  standard: { label: 'Standard', hint: '~80 stories · ~4 batches' },
-  deep: { label: 'Deep', hint: '~150 stories · ~6 batches · most coverage' },
+  light:    { label: 'Light',    hint: '~6.5K in / 4.5K out' },
+  standard: { label: 'Standard', hint: '~13K in / 9K out' },
+  deep:     { label: 'Deep',     hint: '~25K in / 17K out' },
 }
 
 /** Return the matching preset name for a PipelineRunTuning, or null if custom. */

@@ -18,17 +18,18 @@ import {
   AUTO_SCRAPE_POOL_FLOOR,
   type PipelineRunTuning,
 } from '@/lib/pipeline-preferences'
+import { FeedIntro } from '@/components/FeedIntro'
 
 const REFRESH_INTERVAL_MS = 15 * 60 * 1000
 const STORIES_PAGE_SIZE = 25
 
 const TERMINAL_LINES = [
-  'watcher/rss          connected (22 sources)',
-  'watcher/reddit       connected (11 subreddits)',
-  'watcher/hn           connected (front-page stream)',
-  'pipeline/filter      scoring batches 2× parallel via claude-haiku-4-5',
-  'pipeline/storage     upserting scored stories',
-  'alerts/opportunity   evaluating score >= 8 signals',
+  'sources/rss          26 feeds (coindesk, decrypt, huggingface, theblock…)',
+  'sources/reddit       19 subreddits (ethereum, LocalLLaMA, ethdev, MEV…)',
+  'sources/hn           front-page via Algolia HN search API',
+  'pipeline/model       claude-haiku-4-5 · BYOK · batch mode',
+  'pipeline/threshold   min score ≥ 5 stored · score ≥ 8 = opportunity',
+  'pipeline/context     user profile + topic overlay injected per batch',
 ]
 
 const INITIAL_PIPE_STEPS = [
@@ -53,13 +54,28 @@ async function readJsonError(res: Response, fallback: string): Promise<string> {
 }
 
 export default function LiveFeedPage() {
+  // 'pending'  — waiting for mount to check sessionStorage (black cover prevents feed flash)
+  // 'show'     — play the intro animation
+  // 'skip'     — intro already seen, go straight to feed
+  const [introState, setIntroState] = useState<'pending' | 'show' | 'skip'>('pending')
+
+  useEffect(() => {
+    const seen = sessionStorage.getItem('signal-intro-seen')
+    setIntroState(seen ? 'skip' : 'show')
+  }, [])
+
+  const handleIntroDone = useCallback(() => {
+    sessionStorage.setItem('signal-intro-seen', '1')
+    setIntroState('skip')
+  }, [])
+
   const [stories, setStories] = useState<Story[]>([])
   const [category, setCategory] = useState<Category>('all')
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [runningPipeline, setRunningPipeline] = useState(false)
   const [scrapingFresh, setScrapingFresh] = useState(false)
-  const [pipelineMessage, setPipelineMessage] = useState('Control room online.')
+  const [pipelineMessage, setPipelineMessage] = useState('Ready.')
   const [pipeSteps, setPipeSteps] = useState(INITIAL_PIPE_STEPS)
   const [pipelinePrefs, setPipelinePrefs] = useState<PipelinePreferences>(DEFAULT_PIPELINE_PREFS)
   const [pipelineRunTuning, setPipelineRunTuning] = useState<PipelineRunTuning>(DEFAULT_PIPELINE_RUN_TUNING)
@@ -70,6 +86,15 @@ export default function LiveFeedPage() {
     stored: number
     batches: number
   } | null>(null)
+  const [lastRunData, setLastRunData] = useState<{
+    run_at: string
+    input_tokens: number | null
+    output_tokens: number | null
+    estimated_cost: number | string | null
+    stories_scored: number | null
+  } | null>(null)
+  const [liveLog, setLiveLog] = useState<string[]>(['> pipeline idle — waiting for run…'])
+  const liveLogRef = useRef<HTMLDivElement>(null)
   const [hasAnthropicKey, setHasAnthropicKey] = useState(false)
   const [hasMoreStories, setHasMoreStories] = useState(false)
   const [storiesNextCursor, setStoriesNextCursor] = useState<string | null>(null)
@@ -101,6 +126,26 @@ export default function LiveFeedPage() {
         setHasAnthropicKey(Boolean(j.hasAnthropicKey))
       }
     })
+  }, [])
+
+  useEffect(() => {
+    void fetch('/api/settings/last-run', { credentials: 'include' }).then(async (r) => {
+      if (r.ok) {
+        const j = (await r.json()) as { lastRun?: typeof lastRunData }
+        if (j.lastRun) setLastRunData(j.lastRun)
+      }
+    })
+  }, [])
+
+  const logLine = useCallback((msg: string) => {
+    const t = new Date().toLocaleTimeString('en-US', { hour12: false })
+    setLiveLog((prev) => [...prev.slice(-40), `[${t}] ${msg}`])
+    // auto-scroll
+    setTimeout(() => {
+      if (liveLogRef.current) {
+        liveLogRef.current.scrollTop = liveLogRef.current.scrollHeight
+      }
+    }, 20)
   }, [])
 
   const fetchPoolState = useCallback(async () => {
@@ -208,6 +253,7 @@ export default function LiveFeedPage() {
 
     pipelineRunningRef.current = true
     setStories([])
+    setLiveLog([])
     setPipeSteps(INITIAL_PIPE_STEPS.map((s) => ({ ...s, state: 'pending' as StepState })))
     setRunningPipeline(true)
     setPipelineMessage('Starting…')
@@ -217,8 +263,11 @@ export default function LiveFeedPage() {
     }
 
     try {
+      logLine(`init pipeline — topic: ${pipelinePrefs.topicMode} · scope: ${pipelinePrefs.scope}`)
+      logLine(`maxCandidates: ${pipelineRunTuning.maxCandidates} · batchSize: ${pipelineRunTuning.batchSize}`)
       mark(0, 'running')
       setPipelineMessage('Checking pool…')
+      logLine('GET /api/pool-state…')
       const before = await fetch('/api/pool-state', { cache: 'no-store', credentials: 'include' })
       const beforePayload = (await before.json().catch(() => ({}))) as {
         success?: boolean
@@ -230,11 +279,16 @@ export default function LiveFeedPage() {
           : null
 
       if (unscoredEligible === null || unscoredEligible < AUTO_SCRAPE_POOL_FLOOR) {
+        const reason = unscoredEligible === null
+          ? 'pool state unknown — scraping to be safe'
+          : `pool low (${unscoredEligible} ready) — scraping first`
+        logLine(reason)
         setPipelineMessage(
           unscoredEligible === null
             ? 'Pool state unknown — scraping to be safe…'
             : `Pool low (${unscoredEligible} ready) — scraping fresh stories first…`
         )
+        logLine('POST /api/scrape — fetching RSS + Reddit + HN…')
         const scrape = await fetch('/api/scrape', {
           method: 'POST',
           credentials: 'include',
@@ -244,20 +298,26 @@ export default function LiveFeedPage() {
 
         if (!scrape.ok) {
           if (scrape.status === 429) {
+            logLine('scrape rate-limited — scoring available stories')
             setPipelineMessage('Scrape rate-limited — scoring what’s available…')
           } else {
             throw new Error(await readJsonError(scrape, 'Scrape failed'))
           }
         } else {
+          logLine('scrape complete ✓')
           setPipelineMessage('Scrape complete — refreshing pool…')
         }
         await fetchPoolState()
       } else {
+        logLine(`pool ok — ${unscoredEligible} unscored stories ready`)
         setPipelineMessage(`${unscoredEligible} stories ready — skipping scrape.`)
       }
       mark(0, 'done')
 
       mark(1, 'running')
+      const estBatches = Math.ceil(pipelineRunTuning.maxCandidates / pipelineRunTuning.batchSize)
+      logLine(`POST /api/filter — ${pipelineRunTuning.maxCandidates} candidates, ~${estBatches} batches`)
+      logLine(`claude-haiku-4-5 → batch 1/${estBatches} scoring…`)
       setPipelineMessage('Step 2 of 3 — scoring with Claude Haiku…')
       const filter = await fetch('/api/filter', {
         method: 'POST',
@@ -292,6 +352,12 @@ export default function LiveFeedPage() {
         typeof filterPayload.totalInputTokens === 'number' &&
         typeof filterPayload.totalOutputTokens === 'number'
       ) {
+        const inK = (filterPayload.totalInputTokens / 1000).toFixed(1)
+        const outK = (filterPayload.totalOutputTokens / 1000).toFixed(1)
+        const batches = filterPayload.totalBatches ?? estBatches
+        logLine(`scoring complete \u2713 \u2014 ${batches} batch${batches === 1 ? '' : 'es'} done`)
+        logLine(`tokens: ${inK}K in / ${outK}K out \u2014 est. $${(filterPayload.estimatedCost ?? 0).toFixed(4)}`)
+        logLine(`stored ${filterPayload.stored ?? 0} stories to your feed`)
         setLastRunStats({
           inputTokens: filterPayload.totalInputTokens,
           outputTokens: filterPayload.totalOutputTokens,
@@ -299,14 +365,23 @@ export default function LiveFeedPage() {
           stored: filterPayload.stored ?? 0,
           batches: filterPayload.totalBatches ?? 0,
         })
+        setLastRunData({
+          run_at: new Date().toISOString(),
+          input_tokens: filterPayload.totalInputTokens,
+          output_tokens: filterPayload.totalOutputTokens,
+          estimated_cost: filterPayload.estimatedCost ?? 0,
+          stories_scored: filterPayload.processed ?? null,
+        })
       }
 
       pipelineRunningRef.current = false
       mark(2, 'running')
-      setPipelineMessage('Step 3 of 3 — loading stories…')
+      logLine('loading feed from database\u2026')
+      setPipelineMessage('Step 3 of 3 \u2014 loading stories\u2026')
       const ok = await fetchStories()
       if (!ok) throw new Error('Stories fetch failed')
       mark(2, 'done')
+      logLine('pipeline complete \u2713')
 
       const batchNote =
         typeof filterPayload.totalBatches === 'number' && filterPayload.totalBatches > 0
@@ -314,8 +389,8 @@ export default function LiveFeedPage() {
           : ''
       setPipelineMessage(
         typeof filterPayload.parseWarning === 'string'
-          ? `Control room synced${batchNote}. Note: ${filterPayload.parseWarning}`
-          : `Control room synced${batchNote}.`
+          ? `Feed updated${batchNote}. Note: ${filterPayload.parseWarning}`
+          : `Feed updated${batchNote}.`
       )
 
       lastSuccessfulPipelinePrefsRef.current = {
@@ -339,7 +414,7 @@ export default function LiveFeedPage() {
       pipelineRunningRef.current = false
       setRunningPipeline(false)
     }
-  }, [fetchStories, fetchPoolState, pipelinePrefs, pipelineRunTuning, hasAnthropicKey])
+  }, [fetchStories, fetchPoolState, pipelinePrefs, pipelineRunTuning, hasAnthropicKey, logLine])
 
   const scrapeFresh = useCallback(async () => {
     if (scrapingFresh || runningPipeline) return
@@ -423,7 +498,10 @@ export default function LiveFeedPage() {
 
   return (
     <main className="signal-wrdlss-shell signal-hero-bg">
-      <div className="mx-auto w-full max-w-6xl px-5 pb-24 pt-5 md:px-8">
+      {/* Pending: black cover prevents feed flash until sessionStorage is checked */}
+      {introState === 'pending' && <div className="fixed inset-0 z-50 bg-black" />}
+      {introState === 'show' && <FeedIntro onDone={handleIntroDone} />}
+      <div className="mx-auto w-full max-w-6xl px-5 pb-16 pt-4 md:px-8">
         <header className="sticky top-5 z-20 mb-10 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/45 px-5 py-3 text-zinc-100 backdrop-blur-xl">
           <Link href="/" className="text-2xl font-semibold tracking-tight text-white">
             Signal
@@ -460,20 +538,40 @@ export default function LiveFeedPage() {
           </div>
         </header>
 
-        <section className="grid gap-6 md:grid-cols-[1.2fr_0.8fr] md:items-start">
-          <div className="signal-section rounded-3xl border border-white/10 bg-black/50 p-7 text-zinc-100 backdrop-blur-md">
-            <p className="mb-4 font-mono text-xs uppercase tracking-[0.2em] text-zinc-500">
-              Live Feed Control Room
-            </p>
-            <h1 className="font-serif text-5xl leading-[0.95] text-zinc-50 md:text-6xl">
-              Real-time signal stream
-            </h1>
-            <p className="mt-4 max-w-xl text-lg text-zinc-400">
-              Monitoring RSS, Reddit, and Hacker News through the filter pipeline and opportunity alerts in one
-              place.
-            </p>
+        {/* ── Stat chips ── */}
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="rounded-2xl border border-white/10 bg-black/50 px-5 py-4 backdrop-blur-md">
+            <p className="font-mono text-[10px] uppercase tracking-widest text-zinc-600">Stories</p>
+            <p className="mt-2 font-mono text-4xl font-bold text-zinc-50">{loading ? '—' : stories.length}</p>
+            {poolState && (
+              <p className="mt-1 font-mono text-[10px] text-zinc-600">{poolState.rawWindow.toLocaleString()} in 72h pool</p>
+            )}
+          </div>
+          <div className="rounded-2xl border border-emerald-500/25 bg-emerald-950/25 px-5 py-4 backdrop-blur-md">
+            <p className="font-mono text-[10px] uppercase tracking-widest text-emerald-700">Opportunities</p>
+            <p className="mt-2 font-mono text-4xl font-bold text-emerald-400">{loading ? '—' : counts.opportunity}</p>
+            <p className="mt-1 font-mono text-[10px] text-emerald-800">score ≥ 8</p>
+          </div>
+          <div className="rounded-2xl border border-sky-500/25 bg-sky-950/25 px-5 py-4 backdrop-blur-md">
+            <p className="font-mono text-[10px] uppercase tracking-widest text-sky-700">Ideas</p>
+            <p className="mt-2 font-mono text-4xl font-bold text-sky-400">{loading ? '—' : counts.idea}</p>
+            <p className="mt-1 font-mono text-[10px] text-sky-800">score 5–7</p>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-black/50 px-5 py-4 backdrop-blur-md">
+            <p className="font-mono text-[10px] uppercase tracking-widest text-zinc-600">Intel</p>
+            <p className="mt-2 font-mono text-4xl font-bold text-zinc-300">{loading ? '—' : counts.intel}</p>
+            {poolState && (
+              <p className="mt-1 font-mono text-[10px] text-zinc-700">{poolState.unscoredEligible.toLocaleString()} unscored</p>
+            )}
+          </div>
+        </div>
 
-            <div className="mt-6">
+        {/* ── Pipeline prefs + Last run ── */}
+        <div className="mt-3 grid gap-3 md:grid-cols-2 md:items-start">
+          {/* Pipeline preferences */}
+          <div className="rounded-2xl border border-white/10 bg-black/50 p-5 text-zinc-100 backdrop-blur-md">
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-500">Pipeline</p>
+            <div className="mt-3">
               <PipelinePreferencesPanel
                 value={pipelinePrefs}
                 onChange={setPipelinePrefs}
@@ -482,18 +580,16 @@ export default function LiveFeedPage() {
                 disabled={runningPipeline}
               />
             </div>
-
             {!hasAnthropicKey && (
-              <p className="mt-4 rounded-xl border border-amber-400/35 bg-amber-950/40 px-4 py-3 text-sm text-amber-100">
+              <p className="mt-3 rounded-xl border border-amber-400/35 bg-amber-950/40 px-4 py-3 text-sm text-amber-100">
                 Add your Anthropic API key in{' '}
                 <Link href="/settings" className="font-medium text-white underline underline-offset-2">
                   Settings
                 </Link>{' '}
-                to run the scoring pipeline (BYOK — your key, your usage).
+                to run the scoring pipeline.
               </p>
             )}
-
-            <div className="mt-4">
+            <div className="mt-3 border-t border-white/8 pt-3">
               <p className="font-mono text-xs leading-snug text-zinc-400">{pipelineMessage}</p>
               {showPipelineDetail && (
                 <div className="mt-2">
@@ -501,90 +597,130 @@ export default function LiveFeedPage() {
                 </div>
               )}
             </div>
-
-            <div className="mt-6 rounded-2xl border border-emerald-500/35 bg-black p-4 font-mono text-xs text-emerald-300">
-              <p className="mb-2 text-emerald-400">terminal://signal-control</p>
-              <div className="space-y-1">
-                {TERMINAL_LINES.map((line) => (
-                  <p key={line}>&gt; {line}</p>
-                ))}
-              </div>
-              <p className="mt-2 text-emerald-200/80">
-                &gt; status: {pipelineMessage}
-                <span className="signal-caret">|</span>
-              </p>
-            </div>
           </div>
 
-          <div className="signal-section rounded-3xl border border-white/10 bg-black/50 p-7 text-zinc-100 backdrop-blur-md">
-            <div className="space-y-3">
-              <div className="rounded-xl border border-white/10 bg-black/40 p-4">
-                <p className="text-sm text-zinc-500">Pool ready to score</p>
-                <p className="mt-1 text-2xl font-semibold text-zinc-50">
-                  {poolState ? poolState.unscoredEligible.toLocaleString() : '—'}
+          {/* Last run analysis */}
+          <div className="rounded-2xl border border-white/10 bg-black/50 p-5 text-zinc-100 backdrop-blur-md">
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-500">Last run</p>
+            {lastRunData ? (
+              <>
+                <p className="mt-0.5 font-mono text-[10px] text-zinc-600">
+                  {new Date(lastRunData.run_at).toLocaleString()}
                 </p>
-                {poolState ? (
-                  <p className="mt-2 text-xs text-zinc-500">
-                    {poolState.unscoredEligible < 40
-                      ? `${poolState.unscoredEligible} left — pipeline will scrape first.`
-                      : `${poolState.unscoredEligible} ready — run pipeline to score up to your budget.`}
-                  </p>
-                ) : (
-                  <p className="mt-2 text-xs text-zinc-500">Loading pool state…</p>
-                )}
-              </div>
-              <div className="rounded-xl border border-white/10 bg-black/40 p-4">
-                <p className="text-sm text-zinc-500">Stories loaded</p>
-                <p className="mt-1 text-2xl font-semibold text-zinc-50">{stories.length}</p>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-black/40 p-4">
-                <p className="text-sm text-zinc-500">Last update</p>
-                <p className="mt-1 text-lg font-semibold text-zinc-50">
-                  {lastUpdated ? lastUpdated.toLocaleTimeString() : 'Loading...'}
-                </p>
-              </div>
-              {lastRunStats ? (
-                <div className="rounded-xl border border-white/10 bg-black/40 p-4">
-                  <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.15em] text-zinc-500">
-                    Last run tokens
-                  </p>
-                  <div className="space-y-1.5 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-zinc-500">Input</span>
-                      <span className="font-medium text-zinc-200">
-                        {lastRunStats.inputTokens.toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-zinc-500">Output</span>
-                      <span className="font-medium text-zinc-200">
-                        {lastRunStats.outputTokens.toLocaleString()}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-zinc-500">Est. cost</span>
-                      <span className="font-medium text-zinc-200">
-                        ${lastRunStats.estimatedCost.toFixed(4)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between border-t border-white/10 pt-1.5">
-                      <span className="text-zinc-500">New this run</span>
-                      <span className="font-medium text-zinc-200">{lastRunStats.stored} stories</span>
-                    </div>
+                <div className="mt-4 grid grid-cols-2 gap-2.5">
+                  <div className="rounded-xl border border-white/8 bg-white/5 px-4 py-3">
+                    <p className="font-mono text-[10px] uppercase tracking-widest text-zinc-600">Scored</p>
+                    <p className="mt-1 font-mono text-2xl font-bold text-zinc-100">
+                      {lastRunData.stories_scored?.toLocaleString() ?? '—'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-950/20 px-4 py-3">
+                    <p className="font-mono text-[10px] uppercase tracking-widest text-emerald-800">Est. cost</p>
+                    <p className="mt-1 font-mono text-2xl font-bold text-emerald-400">
+                      {lastRunData.estimated_cost != null
+                        ? `$${Number(lastRunData.estimated_cost).toFixed(4)}`
+                        : '—'}
+                    </p>
                   </div>
                 </div>
-              ) : null}
+                <div className="mt-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-500">Input tokens</span>
+                    <span className="font-mono text-xs text-zinc-400">
+                      {lastRunData.input_tokens != null ? `${(lastRunData.input_tokens / 1000).toFixed(1)}K` : '—'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-500">Output tokens</span>
+                    <span className="font-mono text-xs text-zinc-400">
+                      {lastRunData.output_tokens != null ? `${(lastRunData.output_tokens / 1000).toFixed(1)}K` : '—'}
+                    </span>
+                  </div>
+                  {lastRunStats && (
+                    <>
+                      <div className="h-px bg-white/5" />
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-zinc-500">Stored to feed</span>
+                        <span className="font-mono text-xs text-zinc-400">{lastRunStats.stored}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-zinc-500">Batches run</span>
+                        <span className="font-mono text-xs text-zinc-400">{lastRunStats.batches}</span>
+                      </div>
+                    </>
+                  )}
+                  {poolState && (
+                    <>
+                      <div className="h-px bg-white/5" />
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-zinc-500">Pool (72h window)</span>
+                        <span className="font-mono text-xs text-zinc-400">{poolState.rawWindow.toLocaleString()} stories</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs text-zinc-500">Unscored eligible</span>
+                        <span className="font-mono text-xs text-zinc-400">{poolState.unscoredEligible.toLocaleString()}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="mt-5 text-center">
+                <p className="font-mono text-3xl text-zinc-700">—</p>
+                <p className="mt-2 text-sm text-zinc-500">No runs yet. Hit Run Pipeline to start.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Terminals ── */}
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          {/* static config */}
+          <div className="rounded-2xl border border-emerald-500/35 bg-black p-4 font-mono text-xs text-emerald-300">
+            <p className="mb-2 text-emerald-400">signal://pipeline-config</p>
+            <div className="space-y-1">
+              {TERMINAL_LINES.map((line) => (
+                <p key={line}>&gt; {line}</p>
+              ))}
+            </div>
+            <p className="mt-2 text-emerald-200/80">
+              &gt; status: {pipelineMessage}
+              <span className="signal-caret">|</span>
+            </p>
+          </div>
+
+          {/* live log */}
+          <div className="flex flex-col rounded-2xl border border-zinc-700/50 bg-black p-4 font-mono text-xs text-zinc-300">
+            <p className="mb-2 flex items-center gap-2 text-zinc-400">
+              signal://live-log
+              {runningPipeline && (
+                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+              )}
+            </p>
+            <div
+              ref={liveLogRef}
+              className="flex-1 space-y-0.5 overflow-y-auto"
+              style={{ maxHeight: '9rem' }}
+            >
+              {liveLog.map((line, i) => (
+                <p
+                  key={i}
+                  className={i === liveLog.length - 1 && runningPipeline ? 'text-emerald-300' : 'text-zinc-400'}
+                >
+                  {line}
+                </p>
+              ))}
             </div>
           </div>
-        </section>
+        </div>
 
         {showFeedSection ? (
           <>
-            <section className="signal-section mt-8 rounded-3xl border border-white/10 bg-black/50 p-4 backdrop-blur-md md:p-6">
+            <section className="mt-3 rounded-2xl border border-white/10 bg-black/50 p-3 backdrop-blur-md">
               <CategoryFilter active={category} onChange={setCategory} counts={counts} />
             </section>
 
-            <section className="mt-6 space-y-4">
+            <section className="mt-3 space-y-3">
               {loading ? (
                 <div className="space-y-4">
                   {[...Array(6)].map((_, i) => (
@@ -598,7 +734,7 @@ export default function LiveFeedPage() {
                 <div className="rounded-2xl border border-white/10 bg-black/55 py-16 text-center text-zinc-400 backdrop-blur-md">
                   <p className="mb-3 text-4xl">📡</p>
                   <p className="font-medium text-zinc-100">No stories yet</p>
-                  <p className="mt-1 text-sm text-zinc-500">Run pipeline to populate the live feed.</p>
+                  <p className="mt-1 text-sm text-zinc-500">Run the pipeline to score and load stories.</p>
                   <button
                     onClick={runPipeline}
                     disabled={runningPipeline || !canRun}
@@ -613,7 +749,7 @@ export default function LiveFeedPage() {
                     <FeedCard key={story.id} story={story} />
                   ))}
                   {hasMoreStories && filtered.length > 0 ? (
-                    <div className="flex justify-center pt-6">
+                    <div className="flex justify-center pt-4">
                       <button
                         type="button"
                         onClick={() => void loadMoreStories()}
@@ -629,13 +765,9 @@ export default function LiveFeedPage() {
             </section>
           </>
         ) : (
-          <section className="signal-section mt-8 rounded-3xl border border-white/10 bg-black/50 p-10 text-center text-zinc-400 backdrop-blur-md">
-            <p className="font-mono text-xs uppercase tracking-[0.2em] text-zinc-500">Pipeline active</p>
-            <p className="mt-3 text-lg font-medium text-zinc-100">Refreshing your feed…</p>
-            <p className="mt-2 mx-auto max-w-md text-sm text-zinc-500">
-              Stories stay hidden until collection, scoring, and reload finish so you don’t see stale cards
-              mixed with a run in progress.
-            </p>
+          <section className="mt-3 rounded-2xl border border-white/10 bg-black/50 py-12 text-center text-zinc-400 backdrop-blur-md">
+            <p className="font-mono text-xs uppercase tracking-[0.2em] text-zinc-500">Pipeline running</p>
+            <p className="mt-2 text-sm font-medium text-zinc-100">Scoring stories — feed will reload when done</p>
           </section>
         )}
       </div>

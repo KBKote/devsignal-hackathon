@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createSupabaseBrowserClient } from '@/lib/supabase/client'
+import { GlowCard } from '@/components/ui/spotlight-card'
 import { REDDIT_BASE, RSS_FEEDS_BASE } from '@/lib/scrape-sources'
 
 type LastRunPayload = {
@@ -72,6 +73,8 @@ export default function SettingsPage() {
   const [resetMessage, setResetMessage] = useState('')
   const [deletingAccount, setDeletingAccount] = useState(false)
   const [deleteMessage, setDeleteMessage] = useState('')
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
 
   useEffect(() => {
     void (async () => {
@@ -258,15 +261,20 @@ export default function SettingsPage() {
     }
   }
 
-  async function deleteAccount() {
+  function openDeleteConfirm() {
     setDeleteMessage('')
-    if (
-      !window.confirm(
-        'Delete your account permanently? This cannot be undone. All your data — API key, scoring profile, feed history — will be erased.'
-      )
-    ) {
-      return
-    }
+    setDeleteConfirmText('')
+    setShowDeleteConfirm(true)
+  }
+
+  function closeDeleteConfirm() {
+    setShowDeleteConfirm(false)
+    setDeleteConfirmText('')
+  }
+
+  async function confirmDeleteAccount() {
+    if (deleteConfirmText.trim().toLowerCase() !== 'delete account') return
+    setShowDeleteConfirm(false)
     setDeletingAccount(true)
     try {
       const res = await fetch('/api/settings/delete-account', {
@@ -298,7 +306,7 @@ export default function SettingsPage() {
 
   return (
     <main className="signal-wrdlss-shell signal-hero-bg px-5 py-12 md:py-16">
-      <div className="mx-auto max-w-lg rounded-3xl border border-white/10 bg-black/70 p-8 text-zinc-100 shadow-xl backdrop-blur-xl">
+      <GlowCard customSize glowColor="purple" className="mx-auto max-w-lg rounded-3xl p-8 text-zinc-100">
         <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-500">Settings</p>
         <h1 className="mt-2 font-serif text-3xl tracking-tight text-zinc-50">Anthropic API key</h1>
         <p className="mt-2 text-sm text-zinc-400">
@@ -459,27 +467,17 @@ export default function SettingsPage() {
         <div className="mt-10 border-t border-white/10 pt-8">
           <h2 className="font-serif text-xl text-zinc-50">Redo questionnaire</h2>
           <p className="mt-1 text-sm text-zinc-400">
-            Re-run Sonnet synthesis using your saved onboarding answers. Updates the scoring profile text above.
+            Re-answer the onboarding questions and Claude Sonnet will generate a fresh scoring profile from your new answers.
           </p>
-          {!canRedoSynthesis ? (
-            <p className="mt-4 text-sm text-zinc-500">
-              No saved questionnaire on file.{' '}
-              <Link href="/onboarding" className="text-white underline hover:text-zinc-200">
-                Complete onboarding
-              </Link>{' '}
-              to enable this.
-            </p>
-          ) : (
-            <button
-              type="button"
-              disabled={synthesizing}
-              onClick={() => void redoQuestionnaireSynthesis()}
-              className="mt-4 rounded-lg border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium text-zinc-100 hover:bg-white/15 disabled:opacity-50"
-            >
-              {synthesizing ? 'Synthesizing…' : 'Re-run profile synthesis'}
-            </button>
-          )}
-          {synthMessage ? <p className="mt-3 text-sm text-zinc-400">{synthMessage}</p> : null}
+          <Link
+            href="/onboarding"
+            className="mt-4 inline-block rounded-lg border border-white/20 bg-white/10 px-4 py-2 text-sm font-medium text-zinc-100 transition hover:bg-white/15"
+          >
+            Redo questionnaire →
+          </Link>
+          <p className="mt-2 text-xs text-zinc-600">
+            You&apos;ll go through all 10 questions again. Synthesis runs at the end and updates the scoring profile above.
+          </p>
         </div>
 
         <div className="mt-10 border-t border-white/10 pt-8">
@@ -508,7 +506,7 @@ export default function SettingsPage() {
           <button
             type="button"
             disabled={deletingAccount}
-            onClick={() => void deleteAccount()}
+            onClick={openDeleteConfirm}
             className="text-red-500 hover:text-red-300 disabled:opacity-50"
           >
             {deletingAccount ? 'Deleting…' : 'Delete account'}
@@ -524,7 +522,56 @@ export default function SettingsPage() {
           </button>
         </div>
         {deleteMessage ? <p className="mt-2 text-sm text-red-400">{deleteMessage}</p> : null}
-      </div>
+      </GlowCard>
+
+      {/* Delete-account confirmation modal */}
+      {showDeleteConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-5 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) closeDeleteConfirm() }}
+        >
+          <div className="w-full max-w-md rounded-2xl border border-red-500/40 bg-zinc-950 p-7 shadow-2xl">
+            <h2 className="font-serif text-2xl text-red-300">Delete your account?</h2>
+            <p className="mt-3 text-sm text-zinc-400 leading-relaxed">
+              This permanently erases your API key, scoring profile, scored feed, and all history.{' '}
+              <span className="text-zinc-200 font-medium">This cannot be undone.</span>
+            </p>
+
+            <div className="mt-6">
+              <label className="block font-mono text-xs text-zinc-500 mb-2">
+                Type <span className="text-zinc-200">delete account</span> to confirm
+              </label>
+              <input
+                type="text"
+                autoFocus
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') void confirmDeleteAccount() }}
+                placeholder="delete account"
+                className="w-full rounded-lg border border-white/15 bg-black px-3 py-2 font-mono text-sm text-zinc-100 outline-none placeholder:text-zinc-700 focus:border-red-500/50"
+              />
+            </div>
+
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={closeDeleteConfirm}
+                className="flex-1 rounded-xl border border-white/15 py-2.5 text-sm font-medium text-zinc-300 transition hover:bg-white/5"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleteConfirmText.trim().toLowerCase() !== 'delete account'}
+                onClick={() => void confirmDeleteAccount()}
+                className="flex-1 rounded-xl border border-red-500/60 bg-red-950/60 py-2.5 text-sm font-medium text-red-100 transition hover:bg-red-950/80 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Delete account
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
