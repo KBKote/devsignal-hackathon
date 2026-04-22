@@ -5,7 +5,15 @@ import { ServiceWorkerRegistrar } from '@/components/ServiceWorkerRegistrar'
 
 const inter = Inter({ subsets: ['latin'] })
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || 'http://localhost:3000'
+/** `new URL()` requires a protocol; Vercel env is sometimes set to `example.com` without `https://`. */
+function canonicalSiteUrl(): string {
+  const raw = process.env.NEXT_PUBLIC_SITE_URL?.trim()
+  if (!raw) return 'http://localhost:3000'
+  if (/^https?:\/\//i.test(raw)) return raw
+  return `https://${raw.replace(/^\/+/, '')}`
+}
+
+const siteUrl = canonicalSiteUrl()
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
