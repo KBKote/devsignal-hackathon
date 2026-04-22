@@ -131,6 +131,14 @@ VAPID_SUBJECT=mailto:you@example.com
 # Production: protects the /api/scrape cron endpoint
 CRON_SECRET=
 NEXT_PUBLIC_SITE_URL=https://your-app.vercel.app
+
+# Optional: in-app bug reports (Nodemailer SMTP — e.g. iCloud smtp.mail.me.com:587 + app-specific password)
+# BUG_REPORT_TO_EMAIL=
+# BUG_REPORT_FROM_EMAIL=
+# SMTP_HOST=
+# SMTP_PORT=587
+# SMTP_USER=
+# SMTP_PASS=
 ```
 
 ### 4. Run locally

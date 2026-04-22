@@ -410,6 +410,12 @@ LIMIT p_match_count;`}</Pre>
                     auth: 'CRON_SECRET',
                     desc: 'Backfill OpenAI embeddings for existing raw_stories rows where embedding IS NULL. Keyset-paginated, stops at 200s to avoid Vercel timeout.',
                   },
+                  {
+                    method: 'POST',
+                    path: '/api/bug-report',
+                    auth: 'Public',
+                    desc: 'Bug reports from the in-app form. multipart/form-data: description, optional repro, pageUrl, userAgent, honeypot field company (must be empty), up to 3 image/* attachments (5 MB each). Rate-limited by IP and by signed-in user. Requires SMTP env vars.',
+                  },
                 ].map((route) => (
                   <div key={route.path} className="rounded-xl border border-white/8 bg-white/[0.03] p-5">
                     <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -464,7 +470,15 @@ VAPID_SUBJECT=mailto:you@example.com
 FILTER_RAW_FETCH_LIMIT=800   # max raw rows fetched before age/unscored filters (default 400, cap 3000)
 FILTER_MAX_CANDIDATES=300    # server ceiling for scored candidates per run (default 300; must be ≥ Deep preset)
 FILTER_BATCH_SIZE=28         # default Haiku batch when client omits batchSize (cap 40)
-FEED_MAX_AGE_DAYS=7          # story age window (filter + stories API; cap 30 in filter)`}</Pre>
+FEED_MAX_AGE_DAYS=7          # story age window (filter + stories API; cap 30 in filter)
+
+# Bug report email (optional — without these, /api/bug-report returns 503)
+BUG_REPORT_TO_EMAIL=you@example.com   # inbox that receives reports
+BUG_REPORT_FROM_EMAIL=you@example.com   # optional From: (defaults to SMTP_USER)
+SMTP_HOST=smtp.mail.me.com              # e.g. iCloud; Gmail uses smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=you@example.com
+SMTP_PASS=app-specific-password       # iCloud: Apple ID → App-Specific Passwords`}</Pre>
               </div>
             </Section>
 
