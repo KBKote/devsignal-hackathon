@@ -27,7 +27,11 @@ function safeFilename(name: string, index: number): string {
 export async function POST(request: Request) {
   if (!isConfigured()) {
     return NextResponse.json(
-      { error: 'bug_report_unconfigured', message: 'Bug reporting is not configured on this server.' },
+      {
+        error: 'bug_report_unconfigured',
+        message:
+          'Bug reporting is not configured. Add BUG_REPORT_TO_EMAIL plus SMTP_HOST, SMTP_PORT, SMTP_USER, and SMTP_PASS to .env.local (see /docs#environment).',
+      },
       { status: 503 }
     )
   }
