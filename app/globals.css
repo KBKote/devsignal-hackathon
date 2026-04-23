@@ -42,6 +42,17 @@ html {
   scroll-snap-type: y proximity;
 }
 
+/* Long feed scroll feels better on phones without snap. */
+@media (max-width: 767px) {
+  .signal-wrdlss-shell {
+    scroll-snap-type: none;
+  }
+
+  .signal-section {
+    scroll-snap-align: unset;
+  }
+}
+
 .signal-wrdlss-shell::before {
   content: '';
   position: fixed;

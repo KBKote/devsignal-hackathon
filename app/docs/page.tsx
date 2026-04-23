@@ -75,6 +75,21 @@ export default function DocsPage() {
           </Link>
         </div>
 
+        <nav
+          aria-label="Documentation sections"
+          className="mb-8 flex gap-2 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] lg:hidden [&::-webkit-scrollbar]:hidden"
+        >
+          {NAV.map((item) => (
+            <a
+              key={item.id}
+              href={`#${item.id}`}
+              className="shrink-0 rounded-full border border-white/10 bg-white/[0.04] px-3 py-2 text-xs font-medium text-zinc-300 transition hover:border-white/20 hover:bg-white/[0.08] hover:text-zinc-100"
+            >
+              {item.label}
+            </a>
+          ))}
+        </nav>
+
         <div className="flex gap-12">
           {/* Sidebar nav — sticky on desktop */}
           <aside className="hidden w-48 flex-shrink-0 lg:block">

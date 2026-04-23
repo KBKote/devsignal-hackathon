@@ -19,7 +19,12 @@ export function FloatingActionMenu({ options, className }: FloatingActionMenuPro
   const [isOpen, setIsOpen] = useState(false)
 
   return (
-    <div className={cn('fixed bottom-8 right-8 z-50', className)}>
+    <div
+      className={cn(
+        'fixed z-50 bottom-[calc(2rem+env(safe-area-inset-bottom,0px))] right-[calc(2rem+env(safe-area-inset-right,0px))]',
+        className
+      )}
+    >
       <Button
         onClick={() => setIsOpen(!isOpen)}
         className="h-12 w-12 rounded-full border border-white/10 bg-zinc-900/90 text-zinc-100 shadow-[0_0_30px_rgba(0,0,0,0.5)] backdrop-blur-xl hover:bg-zinc-800/90 hover:border-white/20"

@@ -50,7 +50,7 @@ export function HomeClient({ isLoggedIn }: { isLoggedIn: boolean }) {
   ]
 
   return (
-    <main className="relative isolate flex min-h-dvh w-full flex-col items-center justify-center overflow-hidden bg-black">
+    <main className="relative isolate flex min-h-dvh w-full flex-col items-center justify-center overflow-hidden bg-black px-4 pt-[env(safe-area-inset-top,0px)] pb-[max(5.5rem,env(safe-area-inset-bottom,0px)+4.5rem)]">
       <ShaderAnimation />
 
       {/* Grid overlay */}
@@ -68,7 +68,7 @@ export function HomeClient({ isLoggedIn }: { isLoggedIn: boolean }) {
         <p className="font-mono text-[10px] uppercase tracking-[0.45em] text-white/20">
           Personal intelligence
         </p>
-        <h1 className="mt-3 text-5xl font-semibold tracking-tight text-white md:text-6xl">
+        <h1 className="mt-3 text-4xl font-semibold tracking-tight text-white sm:text-5xl md:text-6xl">
           Dev Signal
         </h1>
         <p className="mt-3 font-mono text-xs text-white/25">

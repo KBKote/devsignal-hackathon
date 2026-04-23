@@ -238,7 +238,7 @@ export default function SettingsPage() {
 
   return (
     <main className="signal-wrdlss-shell signal-hero-bg px-5 py-12 md:py-16">
-      <GlowCard customSize glowColor="purple" className="mx-auto max-w-lg rounded-3xl p-8 text-zinc-100">
+      <GlowCard customSize glowColor="purple" className="mx-auto max-w-lg rounded-3xl p-5 text-zinc-100 sm:p-8">
         <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-500">Settings</p>
         <h1 className="mt-2 font-serif text-3xl tracking-tight text-zinc-50">Anthropic API key</h1>
         <p className="mt-2 text-sm text-zinc-400">
@@ -431,21 +431,23 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <div className="mt-8 flex flex-wrap items-center gap-3 text-sm">
-          <Link href="/feed" className="font-medium text-white underline hover:text-zinc-200">
-            Open live feed
-          </Link>
+        <div className="mt-8 flex flex-col gap-3 text-sm sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="flex flex-wrap items-center gap-3">
+            <Link href="/feed" className="font-medium text-white underline hover:text-zinc-200">
+              Open live feed
+            </Link>
+            <button
+              type="button"
+              disabled={deletingAccount}
+              onClick={openDeleteConfirm}
+              className="text-red-500 hover:text-red-300 disabled:opacity-50"
+            >
+              {deletingAccount ? 'Deleting…' : 'Delete account'}
+            </button>
+          </div>
           <button
             type="button"
-            disabled={deletingAccount}
-            onClick={openDeleteConfirm}
-            className="text-red-500 hover:text-red-300 disabled:opacity-50"
-          >
-            {deletingAccount ? 'Deleting…' : 'Delete account'}
-          </button>
-          <button
-            type="button"
-            className="ml-auto text-zinc-500 hover:text-zinc-200"
+            className="text-left text-zinc-500 hover:text-zinc-200 sm:ml-auto sm:text-right"
             onClick={() => {
               void createSupabaseBrowserClient().auth.signOut().then(() => router.replace('/'))
             }}

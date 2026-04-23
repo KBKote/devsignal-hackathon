@@ -120,7 +120,7 @@ export function BugReportButton() {
 
   return (
     <>
-      <div className="fixed bottom-6 left-6 z-40 print:hidden">
+      <div className="fixed bottom-[calc(1.5rem+env(safe-area-inset-bottom,0px))] left-[calc(1.5rem+env(safe-area-inset-left,0px))] z-40 print:hidden">
         <Button
           type="button"
           onClick={() => {
@@ -139,7 +139,7 @@ export function BugReportButton() {
 
       {open ? (
         <div
-          className="fixed inset-0 z-[100] flex items-end justify-center p-4 sm:items-center print:hidden"
+          className="fixed inset-0 z-[100] flex items-end justify-center p-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))] sm:items-center sm:pb-4 print:hidden"
           role="presentation"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) close()

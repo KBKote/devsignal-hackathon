@@ -557,12 +557,15 @@ export default function LiveFeedPage() {
       {/* Pending: black cover prevents feed flash until sessionStorage is checked */}
       {introState === 'pending' && <div className="fixed inset-0 z-50 bg-black" />}
       {introState === 'show' && <FeedIntro onDone={handleIntroDone} />}
-      <div className="mx-auto w-full max-w-6xl px-5 pb-16 pt-4 md:px-8">
-        <header className="sticky top-5 z-20 mb-10 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-black/45 px-5 py-3 text-zinc-100 backdrop-blur-xl">
-          <Link href="/" className="text-2xl font-semibold tracking-tight text-white">
+      <div className="mx-auto w-full max-w-6xl px-4 pb-[calc(6.5rem+env(safe-area-inset-bottom,0px))] pt-3 sm:px-5 sm:pb-16 md:px-8 md:pt-4">
+        <header className="sticky top-2 z-20 mb-6 flex flex-col gap-3 rounded-2xl border border-white/10 bg-black/45 px-4 py-3 text-zinc-100 backdrop-blur-xl sm:top-5 sm:mb-10 sm:px-5 md:flex-row md:flex-wrap md:items-center md:justify-between md:gap-3">
+          <Link
+            href="/"
+            className="text-xl font-semibold tracking-tight text-white sm:text-2xl md:inline-block"
+          >
             Dev Signal
           </Link>
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:justify-end sm:gap-3">
             <button
               onClick={runPipeline}
               disabled={runningPipeline || scrapingFresh || !canRun}
@@ -573,7 +576,7 @@ export default function LiveFeedPage() {
                     ? 'Add a custom topic or choose a preset'
                     : undefined
               }
-              className="rounded-full border border-white/20 bg-white px-4 py-2 text-sm font-medium text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
+              className="min-h-11 rounded-full border border-white/20 bg-white px-4 py-2.5 text-sm font-medium text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {runningPipeline ? 'Running...' : 'Run Pipeline'}
             </button>
@@ -581,13 +584,13 @@ export default function LiveFeedPage() {
               onClick={() => void scrapeFresh()}
               disabled={scrapingFresh || runningPipeline}
               title="Scrape every preset RSS feed, subreddit pack, and HN query at once (ignores topic selection). Rate-limited."
-              className="rounded-full border border-white/15 bg-white/5 px-4 py-2 text-sm font-medium text-zinc-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
+              className="min-h-11 rounded-full border border-white/15 bg-white/5 px-4 py-2.5 text-sm font-medium text-zinc-100 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {scrapingFresh ? 'Scraping…' : 'Scrape Fresh'}
             </button>
             <Link
               href="/settings"
-              className="rounded-full border border-white/15 px-4 py-2 text-sm font-medium text-zinc-100 transition hover:bg-white/10"
+              className="col-span-2 flex min-h-11 items-center justify-center rounded-full border border-white/15 px-4 py-2.5 text-center text-sm font-medium text-zinc-100 transition hover:bg-white/10 sm:col-span-1 sm:min-h-0 sm:inline-flex sm:py-2"
             >
               Settings
             </Link>
@@ -596,25 +599,25 @@ export default function LiveFeedPage() {
 
         {/* ── Stat chips ── */}
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <div className="rounded-2xl border border-white/10 bg-black/50 px-5 py-4 backdrop-blur-md">
+          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3 backdrop-blur-md sm:px-5 sm:py-4">
             <p className="font-mono text-[10px] uppercase tracking-widest text-zinc-600">Stories</p>
-            <p className="mt-2 font-mono text-4xl font-bold text-zinc-50">{loading ? '—' : stories.length}</p>
-            <p className="mt-1 text-[11px] leading-snug text-zinc-500">{STAT_CHIP_HELP.stories}</p>
+            <p className="mt-2 font-mono text-3xl font-bold text-zinc-50 sm:text-4xl">{loading ? '—' : stories.length}</p>
+            <p className="mt-1 hidden text-[11px] leading-snug text-zinc-500 md:block">{STAT_CHIP_HELP.stories}</p>
           </div>
-          <div className="rounded-2xl border border-emerald-500/25 bg-emerald-950/25 px-5 py-4 backdrop-blur-md">
+          <div className="rounded-2xl border border-emerald-500/25 bg-emerald-950/25 px-4 py-3 backdrop-blur-md sm:px-5 sm:py-4">
             <p className="font-mono text-[10px] uppercase tracking-widest text-emerald-700">Opportunities</p>
-            <p className="mt-2 font-mono text-4xl font-bold text-emerald-400">{loading ? '—' : counts.opportunity}</p>
-            <p className="mt-1 text-[11px] leading-snug text-emerald-800/90">{STAT_CHIP_HELP.opportunities}</p>
+            <p className="mt-2 font-mono text-3xl font-bold text-emerald-400 sm:text-4xl">{loading ? '—' : counts.opportunity}</p>
+            <p className="mt-1 hidden text-[11px] leading-snug text-emerald-800/90 md:block">{STAT_CHIP_HELP.opportunities}</p>
           </div>
-          <div className="rounded-2xl border border-sky-500/25 bg-sky-950/25 px-5 py-4 backdrop-blur-md">
+          <div className="rounded-2xl border border-sky-500/25 bg-sky-950/25 px-4 py-3 backdrop-blur-md sm:px-5 sm:py-4">
             <p className="font-mono text-[10px] uppercase tracking-widest text-sky-700">Ideas</p>
-            <p className="mt-2 font-mono text-4xl font-bold text-sky-400">{loading ? '—' : counts.idea}</p>
-            <p className="mt-1 text-[11px] leading-snug text-sky-800/90">{STAT_CHIP_HELP.ideas}</p>
+            <p className="mt-2 font-mono text-3xl font-bold text-sky-400 sm:text-4xl">{loading ? '—' : counts.idea}</p>
+            <p className="mt-1 hidden text-[11px] leading-snug text-sky-800/90 md:block">{STAT_CHIP_HELP.ideas}</p>
           </div>
-          <div className="rounded-2xl border border-white/10 bg-black/50 px-5 py-4 backdrop-blur-md">
+          <div className="rounded-2xl border border-white/10 bg-black/50 px-4 py-3 backdrop-blur-md sm:px-5 sm:py-4">
             <p className="font-mono text-[10px] uppercase tracking-widest text-zinc-600">Intel</p>
-            <p className="mt-2 font-mono text-4xl font-bold text-zinc-300">{loading ? '—' : counts.intel}</p>
-            <p className="mt-1 text-[11px] leading-snug text-zinc-500">{STAT_CHIP_HELP.intel}</p>
+            <p className="mt-2 font-mono text-3xl font-bold text-zinc-300 sm:text-4xl">{loading ? '—' : counts.intel}</p>
+            <p className="mt-1 hidden text-[11px] leading-snug text-zinc-500 md:block">{STAT_CHIP_HELP.intel}</p>
           </div>
         </div>
 

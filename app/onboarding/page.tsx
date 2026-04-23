@@ -167,7 +167,7 @@ export default function OnboardingPage() {
 
   return (
     <main className="signal-wrdlss-shell signal-hero-bg px-5 py-12 md:py-16">
-      <div className="mx-auto max-w-lg rounded-3xl border border-white/10 bg-black/70 p-8 text-zinc-100 shadow-xl backdrop-blur-xl">
+      <div className="mx-auto max-w-lg rounded-3xl border border-white/10 bg-black/70 p-5 text-zinc-100 shadow-xl backdrop-blur-xl sm:p-8">
         <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-zinc-500">Onboarding</p>
         <h1 className="mt-2 font-serif text-3xl tracking-tight text-zinc-50">Your signal profile</h1>
         <p className="mt-2 text-sm text-zinc-400">

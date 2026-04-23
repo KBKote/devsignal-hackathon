@@ -251,6 +251,13 @@ Until throttle **tables** are missing, scrape/filter rate limiters **log a warni
 
 `GET /api/stories` accepts `limit` (default 20, max 80) and optional `cursor` (base64url JSON of the last row's `{ score, scored_at, id }` from the previous page). The handler fetches **limit + 1** rows internally so `hasMore` is accurate on the last page. Response includes `hasMore` and `nextCursor` (pass as `cursor` for the next page). The feed uses **Load more** with keyset pagination so inserts do not shift pages.
 
+## Mobile layout
+
+- Root [`app/layout.tsx`](app/layout.tsx) exports `viewport` with `viewportFit: 'cover'` for notch-safe full-bleed pages.
+- [`app/globals.css`](app/globals.css): `.signal-wrdlss-shell` disables vertical scroll-snap below 768px so long feed scroll feels natural on phones.
+- Feed ([`app/feed/page.tsx`](app/feed/page.tsx)): stacked header + 2-column action grid on narrow viewports; stat chip helper copy is `hidden md:block`; extra bottom padding below `sm` clears the fixed bug-report control with `env(safe-area-inset-bottom)`.
+- [`components/FloatingActionMenu.tsx`](components/FloatingActionMenu.tsx) and [`components/BugReportButton.tsx`](components/BugReportButton.tsx) use `calc(...+ env(safe-area-inset-*))` for fixed positioning.
+
 ## Sub-Agents
 This project uses specialized Claude sub-agents defined in `.claude/agents/`:
 
