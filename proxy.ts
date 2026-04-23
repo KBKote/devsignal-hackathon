@@ -1,9 +1,25 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { getPublicOrigin } from '@/lib/request-origin'
-import { getSupabasePublicAnonKey, getSupabasePublicUrl } from '@/lib/supabase-public-env'
+import {
+  getSupabasePublicAnonKey,
+  getSupabasePublicUrl,
+  hasSupabasePublicConfig,
+} from '@/lib/supabase-public-env'
 
 export async function proxy(request: NextRequest) {
+  if (!hasSupabasePublicConfig()) {
+    if (process.env.NODE_ENV === 'development') {
+      console.warn(
+        '[proxy] NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are missing — auth gate skipped for local dev. Add them to .env.local (see README.md).'
+      )
+      return NextResponse.next({ request })
+    }
+    throw new Error(
+      'NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY are required. See https://supabase.com/dashboard/project/_/settings/api'
+    )
+  }
+
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(

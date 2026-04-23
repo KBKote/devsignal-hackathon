@@ -16,12 +16,12 @@ A running log of thoughts, discoveries, and feature ideas. No structure required
 
 ### Pre-launch checklist (before posting publicly)
 
-| Item | Cost | Time | Priority |
-|---|---|---|---|
-| **Resend SMTP in Supabase Auth settings** | Free | 10 min | Must do first — fixes 3 emails/hour limit that blocks sign-ups |
-| Verify error pages show no stack traces | Free | 30 min | Do before posting |
-| Default pipeline budget to Standard | Free | 5 min | Prevents edge-case timeouts for new users |
-| UptimeRobot keep-alive ping | Free | 5 min | Nice to have |
+| Item | Cost | Time | Priority | Status |
+|---|---|---|---|---|
+| **Resend SMTP in Supabase Auth settings** | Free | 10 min | Must do first — fixes 3 emails/hour limit that blocks sign-ups | ✅ Done |
+| Verify error pages show no stack traces | Free | 30 min | Do before posting | ✅ Done |
+| Default pipeline budget to Standard | Free | 5 min | Prevents edge-case timeouts for new users | ✅ Done |
+| UptimeRobot keep-alive ping | Free | 5 min | Nice to have | ❓ Unverified |
 
 ### Platform decisions
 

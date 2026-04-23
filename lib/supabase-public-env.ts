@@ -6,3 +6,7 @@ export function getSupabasePublicUrl(): string {
 export function getSupabasePublicAnonKey(): string {
   return (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '').trim()
 }
+
+export function hasSupabasePublicConfig(): boolean {
+  return Boolean(getSupabasePublicUrl() && getSupabasePublicAnonKey())
+}

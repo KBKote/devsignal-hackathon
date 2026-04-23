@@ -3,14 +3,14 @@
 import { useState, useCallback, useEffect } from "react"
 import { ParticleTextEffect, type WordConfig } from "@/components/ui/particle-text-effect"
 
-/** Extra ms once the word reads as formed before disperse; @kbxxxj keeps default timing. */
-const HOLD_AFTER_FORM_MS = 600
+/** Extra ms once the word reads as formed before disperse. */
+const HOLD_AFTER_FORM_MS = 1400
 
 const INTRO_WORDS: WordConfig[] = [
-  { text: "This is",    font: (w) => `300 ${Math.round(w * 0.04)}px Georgia, serif`,    msDuration: 2800 + HOLD_AFTER_FORM_MS },
-  { text: "Dev Signal", font: (w) => `600 ${Math.round(w * 0.065)}px Georgia, serif`,   msDuration: 2800 + HOLD_AFTER_FORM_MS },
-  { text: "By",         font: (w) => `300 ${Math.round(w * 0.04)}px Georgia, serif`,     msDuration: 2200 + HOLD_AFTER_FORM_MS },
-  { text: "@kbxxxj",    font: (w) => `400 ${Math.round(w * 0.05)}px 'Courier New', monospace` },
+  { text: "This is",    font: (w) => `700 ${Math.round(w * 0.04)}px Georgia, serif`,    msDuration: 2000 + HOLD_AFTER_FORM_MS },
+  { text: "Dev Signal", font: (w) => `700 ${Math.round(w * 0.065)}px Georgia, serif`,   msDuration: 1600 + HOLD_AFTER_FORM_MS },
+  { text: "By",         font: (w) => `700 ${Math.round(w * 0.04)}px Georgia, serif`,     msDuration: 1200 + HOLD_AFTER_FORM_MS },
+  { text: "@kbxxxj",    font: (w) => `700 ${Math.round(w * 0.05)}px 'Courier New', monospace`, msDuration: 1800 + HOLD_AFTER_FORM_MS },
 ]
 
 interface FeedIntroProps {
@@ -34,7 +34,8 @@ export function FeedIntro({ onDone }: FeedIntroProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black"
+      className="fixed inset-0 z-50 bg-black cursor-pointer"
+      onClick={dismiss}
       style={{
         opacity: fading ? 0 : 1,
         transition: fading ? "opacity 0.9s ease-in-out" : undefined,
@@ -43,9 +44,8 @@ export function FeedIntro({ onDone }: FeedIntroProps) {
     >
       <ParticleTextEffect
         words={INTRO_WORDS}
-        msPerWord={2800}
-        msFinalHold={2800}
-        msDisperse={500}
+        msPerWord={1800}
+        msFinalHold={1200}
         onComplete={dismiss}
       />
 
