@@ -18,19 +18,23 @@ interface FeedIntroProps {
 }
 
 export function FeedIntro({ onDone }: FeedIntroProps) {
+  const [isMobile] = useState(() => window.innerWidth < 768)
   const [fading, setFading] = useState(false)
   const [showSkip, setShowSkip] = useState(false)
 
   useEffect(() => {
+    if (isMobile) { onDone(); return }
     const t = window.setTimeout(() => setShowSkip(true), 2500)
     return () => clearTimeout(t)
-  }, [])
+  }, [isMobile, onDone])
 
   const dismiss = useCallback(() => {
     if (fading) return
     setFading(true)
     window.setTimeout(onDone, 900)
   }, [fading, onDone])
+
+  if (isMobile) return null
 
   return (
     <div
