@@ -125,19 +125,22 @@ export async function POST(req: Request) {
   const onboarding_completed = existing?.onboarding_completed ?? true
   const now = new Date().toISOString()
 
-  const { error: upsertErr } = await db.from('user_profiles').upsert(
-    {
-      user_id: user.id,
-      profile,
-      onboarding_completed,
-      scoring_markdown: text,
-      profile_embedding: profileEmbedding,
-      questionnaire_answers: answers as unknown as Record<string, unknown>,
-      synthesized_at: now,
-      updated_at: now,
-    },
-    { onConflict: 'user_id' }
-  )
+  const upsertPayload: Record<string, unknown> = {
+    user_id: user.id,
+    profile,
+    onboarding_completed,
+    scoring_markdown: text,
+    questionnaire_answers: answers as unknown as Record<string, unknown>,
+    synthesized_at: now,
+    updated_at: now,
+  }
+  if (profileEmbedding !== null) {
+    upsertPayload.profile_embedding = profileEmbedding
+  }
+
+  const { error: upsertErr } = await db.from('user_profiles').upsert(upsertPayload, {
+    onConflict: 'user_id',
+  })
 
   if (upsertErr) {
     console.error('[synthesize-profile] upsert', upsertErr.message)

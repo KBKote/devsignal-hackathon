@@ -52,7 +52,7 @@ function toIsoString(value: unknown): string | null {
 }
 
 const rootValue = {
-  scoredStories: async (_parent: unknown, args: { limit?: number | null }) => {
+  scoredStories: async (args: { limit?: number | null }) => {
     const userId = process.env.AGENT_USER_ID?.trim()
     if (!userId) {
       console.error('[api/graphql] missing AGENT_USER_ID')

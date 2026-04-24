@@ -50,18 +50,20 @@ export function AuthLandingForm() {
         data,
         timestamp: Date.now(),
       }
-      // #region agent log
-      void fetch('/api/debug/agent-log', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }).catch(() => {})
-      void fetch('http://127.0.0.1:7478/ingest/c448f6fb-cf2f-4029-94e1-d5bd2d673db2', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'd9c924' },
-        body: JSON.stringify(payload),
-      }).catch(() => {})
-      // #endregion
+      if (process.env.NODE_ENV === 'development') {
+        // #region agent log
+        void fetch('/api/debug/agent-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }).catch(() => {})
+        void fetch('http://127.0.0.1:7478/ingest/c448f6fb-cf2f-4029-94e1-d5bd2d673db2', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'd9c924' },
+          body: JSON.stringify(payload),
+        }).catch(() => {})
+        // #endregion
+      }
     }
 
     const supabaseEnvProbe = () => {
