@@ -1,0 +1,326 @@
+================================================================================
+DEV SIGNAL → AUTONOMOUS PUBLISHER
+AWS Hackathon Build Roadmap
+================================================================================
+
+WORKFLOW FOR EVERY PHASE
+─────────────────────────
+1. Claude generates PLAN prompt
+2. Paste into Cursor → Cursor outputs plan
+3. Paste plan back to Claude for review
+4. Claude approves OR gives revision prompt
+5. Claude generates BUILD prompt
+6. Paste into Cursor → Cursor builds
+7. Paste output back to Claude for audit
+8. Repeat
+
+================================================================================
+PHASE 0 — CHAINGUARD (DONE ✅)
+================================================================================
+
+Status: Complete. Both Dockerfile stages already use cgr.dev/chainguard/node.
+
+No action needed.
+
+Sponsor tool credited: Chainguard
+
+
+================================================================================
+PHASE 1 — TINYFISH SCRAPER
+================================================================================
+
+Status: Plan approved. Ready to build.
+
+What it does:
+  Replaces manual RSS-only scraping with an autonomous web agent that actually
+  browses CoinDesk, Hacker News, Decrypt, and r/ethereum in real-time.
+  Runs alongside existing scrapers — additive, not a replacement.
+
+Files changed:
+  lib/scraper/rss.ts          → add optional summary field to RawStory interface
+  lib/scraper/tinyfish.ts     → NEW — TinyFish HTTP client, fail-soft, maps to RawStory
+  app/api/scrape/route.ts     → wire scrapeTinyFish() into Promise.all + breakdown
+
+New env var:
+  TINYFISH_API_KEY=           (from agent.tinyfish.ai)
+
+Key constraints:
+  - 20s AbortController timeout (not 30s — Vercel maxDuration is 60s)
+  - Defensive array extraction: body → body.results → body.data → body.stories
+  - scrapeTinyFish never throws — all errors return []
+  - Not gated by fullSources flag — always runs
+
+Sponsor tool credited: TinyFish
+
+
+================================================================================
+PHASE 2 — GHOST DB (AGENT RUN LOGGING)
+================================================================================
+
+Status: Not started.
+
+What it does:
+  Logs every autonomous agent run to a separate Ghost Postgres database.
+  Enables the demo moment: show ghost sql query in the terminal during the demo.
+
+Files changed:
+  lib/ghost-db.ts             → NEW — pg Pool, AgentRunLog interface, logAgentRun()
+  package.json                → add pg and @types/pg dependencies
+
+New env var:
+  DATABASE_URL_GHOST=         (from: ghost create --name devsignal-hackathon --wait)
+
+Table created on first run (CREATE TABLE IF NOT EXISTS agent_runs):
+  run_id UUID PRIMARY KEY
+  started_at TIMESTAMPTZ
+  completed_at TIMESTAMPTZ
+  stories_scraped INTEGER
+  stories_scored INTEGER
+  top_stories JSONB
+  published_url TEXT
+  status TEXT  ('success' | 'error')
+  error_message TEXT
+  created_at TIMESTAMPTZ DEFAULT now()
+
+Key constraints:
+  - logAgentRun never throws — DB errors are logged, not propagated
+  - Pool created lazily (only when DATABASE_URL_GHOST is set)
+  - Table creation uses IF NOT EXISTS with a module-level flag (runs once)
+
+Demo CLI command:
+  ghost sql devsignal-hackathon \
+    "SELECT run_id, stories_scraped, stories_scored, status \
+     FROM agent_runs ORDER BY created_at DESC LIMIT 5"
+
+Sponsor tool credited: Ghost DB
+
+
+================================================================================
+PHASE 3 — AGENT ORCHESTRATOR + x402 GATE
+================================================================================
+
+Status: Not started.
+Depends on: Phase 1 (TinyFish) + Phase 2 (Ghost DB)
+
+What it does:
+  Single endpoint that drives the full autonomous loop:
+    scrape → score → publish → log
+  Protected by x402 payment gate — no API key returns HTTP 402.
+  Uses server-side ANTHROPIC_API_KEY directly (not per-user BYOK).
+
+Files changed:
+  app/api/agent/run/route.ts  → NEW — orchestrator endpoint
+  lib/publish.ts              → NEW stub (returns null, filled in Phase 4)
+
+New env vars:
+  AGENT_API_KEY=              (any secret string you choose)
+  AGENT_USER_ID=              (fixed UUID for the autonomous agent user in Supabase)
+  ANTHROPIC_API_KEY=          (server-side key, bypasses BYOK requirement)
+
+Endpoint: POST /api/agent/run
+
+Auth logic (x402 pattern):
+  - No x-api-key header           → HTTP 402
+                                    { error: 'Payment required',
+                                      price: '$0.01/briefing',
+                                      docs: '/api/agent/run' }
+  - x-api-key === AGENT_API_KEY   → proceed
+  - Authorization: Bearer CRON_SECRET → also proceed (internal calls)
+
+Full loop inside the handler:
+  1. Record started_at
+  2. Call scrapeTinyFish() + fetch latest 20 from raw_stories (Supabase)
+  3. Merge + deduplicate by URL → take top 15
+  4. Score with Claude Haiku (server ANTHROPIC_API_KEY, single batch call)
+     System: "Score each story 1-10 for developer/AI/crypto relevance.
+              Return JSON: [{title, score, why}]"
+  5. Upsert top 5 (score >= 7) to scored_stories with AGENT_USER_ID
+  6. Call publishBriefing() → returns URL or null (stub in Phase 3, real in Phase 4)
+  7. logAgentRun() → Ghost DB (try/catch, non-fatal)
+  8. Return {
+       success, run_id, stories_scraped, stories_scored,
+       top_stories (top 3), published_url, elapsed_seconds
+     }
+
+Error handling:
+  If any step fails, still attempt logAgentRun with status: 'error', then return 500.
+
+Demo curl:
+  # Full run
+  curl -X POST https://devsignal.space/api/agent/run \
+    -H "x-api-key: $AGENT_API_KEY"
+
+  # x402 demo
+  curl -X POST https://devsignal.space/api/agent/run
+  → HTTP 402 { "error": "Payment required", "price": "$0.01/briefing" }
+
+
+================================================================================
+PHASE 4 — PUBLISH ENDPOINT
+================================================================================
+
+Status: Not started.
+Depends on: Phase 3 (lib/publish.ts stub exists)
+
+What it does:
+  Takes top 5 scored stories and publishes a markdown briefing to a public
+  GitHub Gist URL. Returns that URL so the demo can show "agent published to web."
+
+Files changed:
+  lib/publish.ts              → replace stub with real GitHub Gist implementation
+  app/api/publish/route.ts    → NEW — thin HTTP wrapper (same x402 auth as agent/run)
+
+New env var:
+  GITHUB_TOKEN=               (PAT with gist scope from github.com/settings/tokens)
+
+publishBriefing(stories) logic:
+  - If GITHUB_TOKEN not set: warn, return null
+  - Format markdown:
+      # Dev Signal Briefing — {date}
+      > Autonomously generated by Dev Signal agent
+      ## Top Stories
+      ### 1. [title](url)
+      **Source:** x | **Score:** x/10
+      {why}
+      ---
+  - POST to https://api.github.com/gists (public: true)
+  - Return gist.html_url
+  - On any error: warn, return null (non-fatal)
+
+app/api/publish/route.ts:
+  - Same x402 auth as /api/agent/run
+  - Fetches top 5 scored_stories for AGENT_USER_ID from Supabase
+  - Calls publishBriefing(stories)
+  - Returns { success: true, published_url: string | null }
+
+Demo:
+  [show the returned gist URL in browser — live published briefing]
+
+
+================================================================================
+PHASE 5 — COSMO GRAPHQL LAYER
+================================================================================
+
+Status: Not started.
+Depends on: Phase 3 (scored_stories being populated by agent)
+
+What it does:
+  Wraps the scored stories API in a GraphQL schema. Register as a subgraph
+  in WunderGraph Cosmo Cloud. Demo shows the Cosmo Studio schema explorer.
+
+Files changed:
+  app/api/graphql/route.ts    → NEW — graphql-js schema + resolvers
+  package.json                → add graphql dependency
+
+Schema:
+  type Story {
+    id: ID!
+    title: String!
+    url: String!
+    source: String
+    summary: String
+    score: Int!
+    why: String
+    publishedAt: String
+    scoredAt: String!
+  }
+  type Query {
+    scoredStories(limit: Int): [Story!]!
+    agentRuns: String!
+  }
+
+Auth: x-api-key OR CRON_SECRET Bearer → 401 if missing (not 402 — this is infra)
+
+scoredStories resolver: query Supabase scored_stories for AGENT_USER_ID
+agentRuns resolver: return instructions string for ghost sql CLI command
+
+GET /api/graphql  → returns SDL as text/plain (for Cosmo introspection)
+POST /api/graphql → executes query
+
+Demo:
+  [show Cosmo Studio schema explorer with the unified GraphQL endpoint]
+
+Sponsor tool credited: WunderGraph Cosmo
+
+
+================================================================================
+ENV VARS MASTER LIST (add to .env.local as each phase completes)
+================================================================================
+
+# Phase 0 — already done
+# Chainguard: no env vars needed
+
+# Phase 1 — TinyFish
+TINYFISH_API_KEY=             # from agent.tinyfish.ai
+
+# Phase 2 — Ghost DB
+DATABASE_URL_GHOST=           # from: ghost create --name devsignal-hackathon --wait
+
+# Phase 3 — Agent orchestrator
+AGENT_API_KEY=                # any secret string you choose for x402 demo
+AGENT_USER_ID=                # fixed UUID — create once, use forever
+ANTHROPIC_API_KEY=            # server-side Anthropic key (may already exist)
+
+# Phase 4 — Publish
+GITHUB_TOKEN=                 # PAT with gist scope
+
+# Phase 5 — Cosmo
+# No new env vars — uses AGENT_API_KEY + Supabase creds already set
+
+
+================================================================================
+DEMO SCRIPT (3 minutes)
+================================================================================
+
+Step 1 — Trigger the agent
+  curl -X POST https://devsignal.space/api/agent/run \
+    -H "x-api-key: $AGENT_API_KEY"
+  "TinyFish is now autonomously browsing the web..."
+
+Step 2 — Show x402
+  curl -X POST https://devsignal.space/api/agent/run
+  → HTTP 402 { "error": "Payment required", "price": "$0.01/briefing" }
+  "Hit it without auth — payment required, $0.01 per briefing."
+
+Step 3 — Show Ghost DB
+  ghost sql devsignal-hackathon \
+    "SELECT run_id, stories_scraped, stories_scored, status \
+     FROM agent_runs ORDER BY created_at DESC LIMIT 5"
+  "Every run logged to an instant Postgres DB — no setup, one command."
+
+Step 4 — Show published briefing
+  [open gist URL from Step 1 response in browser]
+  "Agent published today's briefing autonomously."
+
+Step 5 — Show Cosmo GraphQL
+  [open Cosmo Studio — show schema explorer]
+  "All APIs unified under one GraphQL schema via WunderGraph Cosmo."
+
+Step 6 — Show Chainguard (already done)
+  "Infrastructure runs on hardened Chainguard containers — minimal CVE surface."
+
+
+================================================================================
+SPONSOR TOOL SCORECARD
+================================================================================
+
+  TinyFish      ✅ Phase 1 — autonomous web scraper replacing manual RSS
+  Ghost DB      ✅ Phase 2 — instant Postgres for agent run logging
+  WunderGraph   ✅ Phase 5 — federated GraphQL layer over scored stories
+  Chainguard    ✅ Phase 0 — hardened Docker base images (already in Dockerfile)
+
+  4/4 sponsor tools integrated. Minimum required: 3.
+
+
+================================================================================
+CURRENT STATUS
+================================================================================
+
+  Phase 0 — Chainguard          DONE ✅
+  Phase 1 — TinyFish scraper    DONE ✅
+  Phase 2 — Ghost DB            DONE ✅
+  Phase 3 — Agent orchestrator  DONE ✅
+  Phase 4 — Publish endpoint    NOT STARTED
+  Phase 5 — Cosmo GraphQL       NOT STARTED
+
+================================================================================

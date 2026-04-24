@@ -6,6 +6,7 @@ import { getFullScrapePack, getScrapePack } from '@/lib/scrape-sources'
 import { scrapeRssFeeds } from '@/lib/scraper/rss'
 import { scrapeReddit } from '@/lib/scraper/reddit'
 import { scrapeHackerNews } from '@/lib/scraper/hn'
+import { scrapeTinyFish } from '@/lib/scraper/tinyfish'
 import { getSupabaseAdmin } from '@/lib/supabase-server'
 import { embedTexts } from '@/lib/embeddings'
 
@@ -43,13 +44,14 @@ export async function POST(request: Request) {
   try {
     // 1. Collect from all sources in parallel (reach widens by topic)
     console.log('[Scrape] Starting data collection...')
-    const [rssStories, redditStories, hnStories] = await Promise.all([
+    const [rssStories, redditStories, hnStories, tinyfishStories] = await Promise.all([
       scrapeRssFeeds(pack.rssFeeds),
       scrapeReddit(pack.subreddits),
       scrapeHackerNews(pack.hnQuery),
+      scrapeTinyFish(),
     ])
 
-    const allStories = [...rssStories, ...redditStories, ...hnStories]
+    const allStories = [...rssStories, ...redditStories, ...hnStories, ...tinyfishStories]
     console.log(`[Scrape] Collected ${allStories.length} stories total`)
 
     // Drop stories older than FEED_MAX_AGE_DAYS (default 7) at insert time so stale
@@ -151,6 +153,7 @@ export async function POST(request: Request) {
         rss: rssStories.length,
         reddit: redditStories.length,
         hn: hnStories.length,
+        tinyfish: tinyfishStories.length,
       },
       cleanup: cleanup ?? undefined,
     })

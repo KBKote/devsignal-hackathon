@@ -132,6 +132,9 @@ VAPID_SUBJECT=mailto:you@example.com
 CRON_SECRET=
 NEXT_PUBLIC_SITE_URL=https://your-app.vercel.app
 
+# Optional: Ghost Postgres connection for autonomous agent run logging (`lib/ghost-db.ts` → `logAgentRun`). Used when POST /api/agent/run exists.
+DATABASE_URL_GHOST=
+
 # Optional: in-app bug reports (Nodemailer SMTP — e.g. iCloud smtp.mail.me.com:587 + app-specific password)
 # BUG_REPORT_TO_EMAIL=
 # BUG_REPORT_FROM_EMAIL=

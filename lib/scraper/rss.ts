@@ -13,6 +13,7 @@ export interface RawStory {
   url: string
   source: string
   raw_text: string
+  summary?: string
   published_at: string | null
 }
 
